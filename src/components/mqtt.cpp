@@ -15,6 +15,116 @@ unsigned long mqttLastRetry = 0;
 bool    panelOn    = true;
 uint8_t brightness = 25;   // overwritten from main's DEFAULT_BRIGHTNESS
 
+// Text notification state
+TextNotification textNotif = {"", 0xFFFF, 1, EFFECT_SCROLL, 0, false};
+
+/* =================================================================
+ *  TEXT NOTIFICATION HELPERS
+ * ================================================================= */
+static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (b >> 3);
+}
+
+// Extract a JSON string value: "key":"value"
+static bool jsonGetString(const String &json, const char *key, char *out, size_t maxLen) {
+    String search = String("\"") + key + "\":\"";
+    int idx = json.indexOf(search);
+    if (idx < 0) return false;
+    idx += search.length();
+    int end = json.indexOf('"', idx);
+    if (end < 0) return false;
+    String val = json.substring(idx, end);
+    strncpy(out, val.c_str(), maxLen - 1);
+    out[maxLen - 1] = '\0';
+    return true;
+}
+
+// Extract a JSON integer value: "key":number
+static bool jsonGetInt(const String &json, const char *key, int32_t *out) {
+    String search = String("\"") + key + "\":";
+    int idx = json.indexOf(search);
+    if (idx < 0) return false;
+    idx += search.length();
+    while (idx < (int)json.length() && json[idx] == ' ') idx++;
+    *out = (int32_t)json.substring(idx).toInt();
+    return true;
+}
+
+// Extract a JSON color array: "color":[r,g,b]
+static bool jsonGetColorArray(const String &json, uint8_t *r, uint8_t *g, uint8_t *b) {
+    String search = "\"color\":[";
+    int idx = json.indexOf(search);
+    if (idx < 0) return false;
+    idx += search.length();
+    int end = json.indexOf(']', idx);
+    if (end < 0) return false;
+    String arr = json.substring(idx, end);
+    int c1 = arr.indexOf(',');
+    int c2 = arr.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) return false;
+    *r = (uint8_t)arr.substring(0, c1).toInt();
+    *g = (uint8_t)arr.substring(c1 + 1, c2).toInt();
+    *b = (uint8_t)arr.substring(c2 + 1).toInt();
+    return true;
+}
+
+/* =================================================================
+ *  APPLY TEXT NOTIFICATION
+ *  Parses a plain-text or JSON payload and arms textNotif.
+ *  JSON: {"text":"…","color":[r,g,b],"size":1,"effect":"scroll","duration":8000}
+ *  Plain text: entire payload used as message with defaults.
+ * ================================================================= */
+void applyTextNotification(const char *payload) {
+    String s(payload);
+    s.trim();
+    if (s.length() == 0) return;
+
+    // Reset to safe defaults
+    textNotif.color     = 0xFFFF;   // white
+    textNotif.size      = 1;
+    textNotif.effect    = EFFECT_SCROLL;
+    textNotif.durationMs = 0;
+
+    if (s.startsWith("{")) {
+        // --- JSON payload ---
+        char txt[256] = "";
+        jsonGetString(s, "text", txt, sizeof(txt));
+        strncpy(textNotif.text, txt, sizeof(textNotif.text) - 1);
+        textNotif.text[sizeof(textNotif.text) - 1] = '\0';
+
+        uint8_t r = 255, g = 255, b = 255;
+        if (jsonGetColorArray(s, &r, &g, &b))
+            textNotif.color = rgb565(r, g, b);
+
+        int32_t sz = 1;
+        if (jsonGetInt(s, "size", &sz)) {
+            if (sz < 1) sz = 1;
+            if (sz > 3) sz = 3;
+            textNotif.size = (uint8_t)sz;
+        }
+
+        char eff[16] = "scroll";
+        jsonGetString(s, "effect", eff, sizeof(eff));
+        if (strcmp(eff, "static") == 0)     textNotif.effect = EFFECT_STATIC;
+        else if (strcmp(eff, "blink") == 0) textNotif.effect = EFFECT_BLINK;
+        else                                textNotif.effect = EFFECT_SCROLL;
+
+        int32_t dur = 0;
+        if (jsonGetInt(s, "duration", &dur) && dur > 0)
+            textNotif.durationMs = (uint32_t)dur;
+    } else {
+        // --- Plain-text payload ---
+        strncpy(textNotif.text, s.c_str(), sizeof(textNotif.text) - 1);
+        textNotif.text[sizeof(textNotif.text) - 1] = '\0';
+    }
+
+    if (strlen(textNotif.text) > 0) {
+        textNotif.active = true;
+        Serial.printf("[NOTIFY] text='%s' size=%d effect=%d dur=%u\n",
+                      textNotif.text, textNotif.size, textNotif.effect, textNotif.durationMs);
+    }
+}
+
 /* =================================================================
  *  BRIGHTNESS / POWER HELPERS
  * ================================================================= */
@@ -91,10 +201,13 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     msg[length] = '\0';
 
     String t(topic);
-    String cmdTopic = mqttTopic + "/set";
-    String brTopic  = mqttTopic + "/brightness/set";
+    String cmdTopic    = mqttTopic + "/set";
+    String brTopic     = mqttTopic + "/brightness/set";
+    String notifyTopic = mqttTopic + "/notify";
 
-    if (t == cmdTopic) {
+    if (t == notifyTopic) {
+        applyTextNotification(msg);
+    } else if (t == cmdTopic) {
         String s(msg);
         if (s.indexOf("\"ON\"") >= 0) applyPanelOn(true);
         else if (s.indexOf("\"OFF\"") >= 0) applyPanelOn(false);
@@ -147,10 +260,12 @@ void mqttConnect() {
     if (ok) {
         Serial.println("[MQTT] Connected!");
         mqttClient.publish(availTopic.c_str(), "online", true);
-        String cmdTopic = mqttTopic + "/set";
-        String brTopic  = mqttTopic + "/brightness/set";
+        String cmdTopic    = mqttTopic + "/set";
+        String brTopic     = mqttTopic + "/brightness/set";
+        String notifyTopic = mqttTopic + "/notify";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
+        mqttClient.subscribe(notifyTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
     } else {

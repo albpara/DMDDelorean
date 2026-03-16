@@ -157,6 +157,103 @@ void showMessage(const char *msg, uint16_t color = 0xFFFF) {
 }
 
 /* =================================================================
+ *  TEXT NOTIFICATION RENDERER
+ *  Renders textNotif to the panel until its duration expires or
+ *  textNotif.active is cleared externally (e.g. by a new notification).
+ *  Calls serviceWeb() in all inner loops so WiFi/MQTT remain responsive.
+ * ================================================================= */
+void handleTextNotification() {
+    if (!dma_display || !textNotif.active) return;
+
+    int sz    = (textNotif.size >= 1 && textNotif.size <= 3) ? textNotif.size : 1;
+    int charW = 6 * sz;   // Adafruit GFX cursor advance per char
+    int charH = 8 * sz;
+    int len   = (int)strlen(textNotif.text);
+    int textW = len * charW;
+    int cy    = (PANEL_RES_Y - charH) / 2;
+    if (cy < 0) cy = 0;
+
+    dma_display->setTextSize(sz);
+    dma_display->setTextWrap(false);
+    dma_display->setTextColor(textNotif.color);
+
+    uint32_t dur = (textNotif.durationMs > 0)
+                 ? textNotif.durationMs
+                 : (uint32_t)DEFAULT_NOTIFY_DURATION_MS;
+    unsigned long startTime = millis();
+
+    switch (textNotif.effect) {
+
+        case EFFECT_STATIC: {
+            int cx = (TOTAL_WIDTH - textW) / 2;
+            if (cx < 0) cx = 0;
+            dma_display->fillScreen(0);
+            dma_display->setCursor(cx, cy);
+            dma_display->print(textNotif.text);
+            while (textNotif.active && (millis() - startTime) < dur) {
+                serviceWeb();
+                delay(50);
+            }
+            textNotif.active = false;
+            break;
+        }
+
+        case EFFECT_SCROLL: {
+            // Text enters from right edge, exits off left edge.
+            // Loops until the duration expires.
+            int startX = TOTAL_WIDTH;
+            int endX   = -textW;
+            bool done  = false;
+            while (!done && textNotif.active) {
+                for (int x = startX; x >= endX; x--) {
+                    dma_display->fillScreen(0);
+                    dma_display->setCursor(x, cy);
+                    dma_display->print(textNotif.text);
+                    serviceWeb();
+                    delay(SCROLL_STEP_MS);
+                    if (!textNotif.active) return;
+                    if ((millis() - startTime) >= dur) { done = true; break; }
+                }
+            }
+            textNotif.active = false;
+            break;
+        }
+
+        case EFFECT_BLINK: {
+            int cx = (TOTAL_WIDTH - textW) / 2;
+            if (cx < 0) cx = 0;
+            bool visible = true;
+            unsigned long lastToggle = millis();
+            dma_display->fillScreen(0);
+            dma_display->setCursor(cx, cy);
+            dma_display->print(textNotif.text);
+            while (textNotif.active && (millis() - startTime) < dur) {
+                if (millis() - lastToggle >= 500) {
+                    visible = !visible;
+                    lastToggle = millis();
+                    dma_display->fillScreen(0);
+                    if (visible) {
+                        dma_display->setCursor(cx, cy);
+                        dma_display->print(textNotif.text);
+                    }
+                }
+                serviceWeb();
+                delay(50);
+            }
+            textNotif.active = false;
+            break;
+        }
+
+        default:
+            textNotif.active = false;
+            break;
+    }
+
+    // Restore default text settings for subsequent GIF status messages
+    dma_display->setTextSize(1);
+}
+
+/* =================================================================
  *  GIF DRAW CALLBACK — called per scanline by AnimatedGIF decoder
  * ================================================================= */
 void GIFDraw(GIFDRAW *pDraw) {
@@ -377,7 +474,12 @@ void playFromBuffer(int bi) {
         int d;
         while (gif.playFrame(false, &d)) {
             unsigned long t = millis();
-            while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
+            while ((millis() - t) < (unsigned long)d) {
+                serviceWeb();
+                if (textNotif.active) break;
+                yield();
+            }
+            if (textNotif.active) break;
         }
         gif.close();
     } else {
@@ -403,7 +505,12 @@ void playFromFile(int fi) {
             int d;
             while (gif.playFrame(false, &d)) {
                 unsigned long t = millis();
-                while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
+                while ((millis() - t) < (unsigned long)d) {
+                    serviceWeb();
+                    if (textNotif.active) break;
+                    yield();
+                }
+                if (textNotif.active) break;
             }
             gif.close();
         } else {
@@ -539,6 +646,12 @@ void setup() {
  *  MAIN LOOP — plays GIFs sequentially, with seamless preloading
  * ================================================================= */
 void loop() {
+    // Text notifications take priority over GIF playback
+    if (textNotif.active) {
+        handleTextNotification();
+        return;
+    }
+
     if (gifCount == 0) {
         serviceWeb();
         delay(100);

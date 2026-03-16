@@ -16,6 +16,7 @@ sequentially on the panel with a **PSRAM ping-pong double-buffer** strategy for 
 | **GIF Decoder** | `bitbank2/AnimatedGIF`. Supports both memory-based (`open(buf, size, cb)`) and file-based (`open(path, openCB, closeCB, readCB, seekCB, drawCB)`) decoding. |
 | **Double Buffer** | Two PSRAM buffers (`gifBuf[0]`, `gifBuf[1]`). While Core 1 plays one buffer, a FreeRTOS task on Core 0 pre-loads the next GIF into the other. Buffers swap instantly between GIFs. Falls back to direct SD file reads when PSRAM is not available. |
 | **SD Card** | SPI (VSPI) bus, protected by a FreeRTOS mutex (`sdMutex`). Only the preload task and the fallback playback path access the SD. |
+| **Text Notifications** | `TextNotification` struct holds text, RGB565 color, font size (1-3), effect (static/scroll/blink), and duration. Activated by MQTT or HTTP POST. `loop()` checks `textNotif.active` first; GIF frame-delay loops also exit early so notifications appear within one frame interval. |
 
 ### Core Assignment
 
@@ -31,7 +32,11 @@ sequentially on the panel with a **PSRAM ping-pong double-buffer** strategy for 
 | File | Purpose |
 |------|---------|
 | `platformio.ini` | Board, framework, libraries, PSRAM build flags |
-| `src/main.cpp` | All firmware code (pin defs, setup, playback loop, preload task, GIF callbacks) |
+| `src/main.cpp` | All firmware code (pin defs, setup, playback loop, preload task, GIF callbacks, `handleTextNotification`) |
+| `src/components/mqtt.h` | Shared types: `TextNotification` struct, effect constants, extern declarations |
+| `src/components/mqtt.cpp` | MQTT client, `applyTextNotification()` (JSON/plain-text parser), notification topic subscription |
+| `src/components/wifi_portal.cpp` | Web server routes including `/notify` POST endpoint |
+| `src/components/portal_html.h` | Single-file captive portal UI (WiFi, MQTT, Panel, Text Display) |
 | `AGENTS.md` | This file — context for AI coding agents |
 | `README.md` | Human-facing documentation |
 
@@ -134,6 +139,38 @@ Wrap the `playFromBuffer`/`playFromFile` calls in an outer `for` loop. The GIF d
 
 ### Switching to random playback
 Replace the sequential `currentIdx = (currentIdx + 1) % gifList.size()` with `currentIdx = esp_random() % gifList.size()` and update the preload target accordingly.
+
+### Text Notifications
+
+Text notifications interrupt GIF playback immediately (within one GIF frame) and resume after the notification duration expires.
+
+**Trigger via MQTT** — publish to `{mqttTopic}/notify`:
+```json
+{"text":"Hello!","color":[255,128,0],"size":2,"effect":"scroll","duration":8000}
+```
+Plain-text payloads (no braces) are accepted and use defaults (white, size 1, scroll, 8 s).
+
+**Trigger via HTTP** — POST to `/notify`:
+```
+text=Hello!&color=255,128,0&size=2&effect=scroll&duration=8000
+```
+
+**Parameters**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `text` | string | — | Message to display (required) |
+| `color` | `[r,g,b]` / `r,g,b` | `[255,255,255]` | RGB 0–255 |
+| `size` | 1 / 2 / 3 | 1 | Adafruit GFX text scale |
+| `effect` | `scroll` / `static` / `blink` | `scroll` | Display effect |
+| `duration` | integer (ms) | 8000 | Display time; 0 = 8 s default |
+
+**Layout notes (128 × 32 panel)**
+- Size 1: 6 × 8 px/char → up to 21 chars without scrolling
+- Size 2: 12 × 16 px/char → up to 10 chars; fits 16 px vertical centred
+- Size 3: 18 × 24 px/char → up to 7 chars; fits 24 px vertical centred
+
+**Shared state** — `TextNotification textNotif` is defined in `mqtt.cpp` and consumed in `main.cpp`. All accesses are on Core 1 (Arduino loop + MQTT callback), so no mutex is required.
 
 ---
 

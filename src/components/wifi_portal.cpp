@@ -204,6 +204,39 @@ static void handlePanel() {
     webServer.send(200, "application/json", resp);
 }
 
+static void handleNotify() {
+    String text     = webServer.arg("text");
+    String colorStr = webServer.arg("color");    // "r,g,b"
+    String effectStr = webServer.arg("effect");  // scroll / static / blink
+    int    size     = webServer.arg("size").toInt();
+    int    dur      = webServer.arg("duration").toInt();
+
+    if (text.length() == 0) {
+        webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"text required\"}");
+        return;
+    }
+
+    // Escape the text value for safe JSON embedding
+    String escaped = text;
+    escaped.replace("\\", "\\\\");
+    escaped.replace("\"", "\\\"");
+
+    // Build a JSON payload and delegate to the shared parser
+    String payload = "{\"text\":\"" + escaped + "\"";
+    if (colorStr.length() > 0)
+        payload += ",\"color\":[" + colorStr + "]";
+    if (size >= 1 && size <= 3)
+        payload += ",\"size\":" + String(size);
+    if (effectStr.length() > 0)
+        payload += ",\"effect\":\"" + effectStr + "\"";
+    if (dur > 0)
+        payload += ",\"duration\":" + String(dur);
+    payload += "}";
+
+    applyTextNotification(payload.c_str());
+    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Notification queued\"}");
+}
+
 static void handleNotFound() {
     if (apMode) {
         handleCaptiveRedirect();
@@ -223,6 +256,7 @@ void wifiSetup() {
     webServer.on("/status", HTTP_GET, handleStatus);
     webServer.on("/mqtt", HTTP_POST, handleMqttSave);
     webServer.on("/panel", HTTP_POST, handlePanel);
+    webServer.on("/notify", HTTP_POST, handleNotify);
     webServer.on("/generate_204", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/connecttest.txt", HTTP_GET, handleCaptiveRedirect);
