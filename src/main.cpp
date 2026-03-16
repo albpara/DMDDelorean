@@ -636,6 +636,8 @@ void playFromFile(int fi) {
  *  Serves captive portal + DNS + MQTT independently from GIF rendering.
  * ================================================================= */
 void networkTaskFn(void *) {
+    wifiSetup();
+    mqttSetup();
     for (;;) {
         serviceWeb();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -796,10 +798,7 @@ void setup() {
     Serial.println("[OK] AnimatedGIF ready");
 
     /* ── 6. WiFi / Captive Portal ──────────────────────────── */
-    Serial.printf("[..] Free heap before WiFi: %u\n", ESP.getFreeHeap());
-    wifiSetup();
-    mqttSetup();
-    Serial.printf("[..] Free heap after WiFi: %u\n", ESP.getFreeHeap());
+    // wifiSetup() and mqttSetup() run on Core 0 inside networkTaskFn
 
     /* ── 7. Allocate PSRAM ping-pong buffers ───────────────── */
     Serial.printf("[..] PSRAM found: %s\n", psramFound() ? "YES" : "NO");
@@ -820,9 +819,7 @@ void setup() {
         Serial.println("[WARN] No PSRAM — file-based fallback");
     }
 
-    /* ── 8. Initial load & preload task ────────────────────── */
-    showMessage("Loading...", dma_display->color565(0, 200, 200));
-
+    /* ── 8. Initial GIF load & preload task ───────────────── */
     if (hasDualBuf) {
         loadIntoBuffer(0, 0);
         playBuf = 0;
@@ -835,7 +832,7 @@ void setup() {
         Serial.println("[OK] Preload task started on Core 0");
     }
 
-    // Network stack (portal + MQTT) on Core 0 for responsiveness
+    // Network stack (WiFi + MQTT + portal) on Core 0
     xTaskCreatePinnedToCore(
         networkTaskFn, "Net", 6144, nullptr, 2, &netTaskHandle, 0);
     Serial.println("[OK] Network task started on Core 0");

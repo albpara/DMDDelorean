@@ -12,11 +12,44 @@ WebServer  webServer(80);
 DNSServer  dnsServer;
 bool       apMode = false;
 unsigned long wifiConnectedAt = 0;
+static bool wifiStaConnecting = false;
+static unsigned long wifiStaStartedAt = 0;
+static bool wifiIpShown = false;
+
+static void startAccessPointPortal() {
+    Serial.println("[WIFI] Starting AP: " AP_SSID);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID);
+    delay(100);
+    Serial.printf("[WIFI] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    dnsServer.start(53, "*", WiFi.softAPIP());
+    apMode = true;
+    wifiStaConnecting = false;
+    wifiIpShown = false;
+    Serial.println("[WIFI] Captive portal ready");
+}
 
 /* =================================================================
  *  WEB SERVER SERVICING — call from playback frame loops
  * ================================================================= */
 void serviceWeb() {
+    if (wifiStaConnecting && WiFi.status() == WL_CONNECTED) {
+        wifiStaConnecting = false;
+        apMode = false;
+        wifiConnectedAt = millis();
+        String ip = WiFi.localIP().toString();
+        Serial.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
+        if (!wifiIpShown) {
+            showMessage(ip.c_str(), dma_display->color565(0, 200, 200));
+            wifiIpShown = true;
+        }
+    } else if (wifiStaConnecting && (millis() - wifiStaStartedAt) >= WIFI_CONNECT_TIMEOUT) {
+        Serial.println("[WIFI] Saved credentials failed");
+        WiFi.disconnect();
+        startAccessPointPortal();
+    }
+
     webServer.handleClient();
     if (apMode) dnsServer.processNextRequest();
     mqttLoop();
@@ -82,6 +115,9 @@ static void handleConnect() {
 
         String ip = WiFi.localIP().toString();
         Serial.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
+        showMessage(ip.c_str(), dma_display->color565(0, 200, 200));
+        wifiIpShown = true;
+        wifiStaConnecting = false;
 
         String resp = "{\"ok\":true,\"ip\":\"" + ip + "\"}";
         webServer.send(200, "application/json", resp);
@@ -301,35 +337,17 @@ void wifiSetup() {
 
     if (savedSSID.length() > 0) {
         Serial.printf("[WIFI] Trying saved network '%s'...\n", savedSSID.c_str());
-        showMessage("WiFi...", dma_display->color565(0, 200, 200));
         WiFi.mode(WIFI_STA);
         WiFi.begin(savedSSID.c_str(), savedPass.c_str());
-
-        unsigned long start = millis();
-        while (WiFi.status() != WL_CONNECTED && (millis() - start) < WIFI_CONNECT_TIMEOUT) {
-            delay(250);
-        }
-
-        if (WiFi.status() == WL_CONNECTED) {
-            apMode = false;
-            wifiConnectedAt = millis();
-            Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-            webServer.begin();
-            return;
-        }
-        Serial.println("[WIFI] Saved credentials failed");
-        WiFi.disconnect();
+        wifiStaConnecting = true;
+        wifiStaStartedAt = millis();
+        apMode = false;
+        wifiIpShown = false;
+        Serial.println("[WIFI] Connecting in background...");
+        webServer.begin();
+        return;
     }
 
-    Serial.println("[WIFI] Starting AP: " AP_SSID);
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID);
-    delay(100);
-    Serial.printf("[WIFI] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
-
-    dnsServer.start(53, "*", WiFi.softAPIP());
-    apMode = true;
-
+    startAccessPointPortal();
     webServer.begin();
-    Serial.println("[WIFI] Captive portal ready");
 }
