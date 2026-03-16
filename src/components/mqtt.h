@@ -33,7 +33,7 @@ struct TextNotification {
     uint16_t color;       // packed RGB565
     uint8_t  size;        // font scale 1–3
     bool     rainbow;     // rainbow colour-cycle effect
-    uint32_t durationMs;  // display time in ms (0 = scroll once)
+    uint32_t duration;    // wide text: loop count, short text: seconds
     volatile bool pending;
 };
 extern TextNotification textNotif;
@@ -44,7 +44,7 @@ class MatrixPanel_I2S_DMA;
 extern MatrixPanel_I2S_DMA *dma_display;
 
 // Parse a JSON or plain-text payload and arm textNotif.
-// JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5000}
+// JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
 // Plain text: entire payload used as message with defaults.
 void applyTextNotification(const char *payload);
 

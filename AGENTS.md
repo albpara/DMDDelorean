@@ -145,15 +145,15 @@ A `TextNotification` struct (defined in `mqtt.h`) is shared between the MQTT mod
 | `color` | `uint16_t` | RGB565 foreground colour |
 | `size` | `uint8_t` | Font scale 1–3 (Adafruit GFX `setTextSize`) |
 | `rainbow` | `bool` | Animate each character in a different hue |
-| `durationMs` | `uint32_t` | Display time in ms; 0 = scroll once |
+| `duration` | `uint32_t` | For scrolling text: loop count. For non-scrolling text: seconds |
 | `pending` | `volatile bool` | Set by MQTT/web, cleared by `loop()` |
 
 **MQTT topic:** `{topic}/notify` (e.g. `delorean-dmd/notify`)  
 **Payload (JSON):**
 ```json
-{"text":"Hello!","color":"#FF8800","size":2,"effect":"rainbow","duration":5000}
+{"text":"Hello!","color":"#FF8800","size":2,"effect":"rainbow","duration":5}
 ```
-All fields except `text` are optional and fall back to defaults (`color=#FFFFFF`, `size=1`, no rainbow, `duration=5000 ms`).
+All fields except `text` are optional and fall back to defaults (`color=#FFFFFF`, `size=1`, no rainbow, `duration=5`).
 
 **Web UI:** The captive portal includes a *Text Notification* section — fill in the message, pick a colour, size (1–3), effect, and duration, then click **Send Notification**.
 
@@ -165,7 +165,7 @@ void showMessage(const char *msg, uint16_t color, uint8_t size = 1);
 **`showNotification` function** (used by `loop()` for MQTT/web notifications):
 ```cpp
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t durationMs);
+                      bool rainbow, uint32_t duration);
 ```
 
 **`applyTextNotification` function** (shared parser — called by both MQTT callback and HTTP handler):

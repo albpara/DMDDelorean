@@ -88,8 +88,8 @@ select{margin-top:4px}
 </div>
 <div class="row">
 <label>Duration</label>
-<input type="number" id="nd" value="5000" style="width:90px" min="0" placeholder="ms">
-<span style="font-size:.8em;margin-left:8px;color:#bbb">ms &nbsp;(0 = scroll once)</span>
+<input type="number" id="nd" value="5" style="width:90px" min="0" placeholder="loops / sec">
+<span style="font-size:.8em;margin-left:8px;color:#bbb">wide=loops, short=seconds</span>
 </div>
 <button class="btn-notify" onclick="sendNotify()">Send Notification</button>
 <div id="nst" class="msg"></div>
@@ -145,7 +145,7 @@ if(!t){N.className='msg err';N.textContent='Enter a message';return;}
 var c=document.getElementById('nc').value;
 var s=document.getElementById('ns').value;
 var e=document.getElementById('ne').value;
-var d=document.getElementById('nd').value||'5000';
+var d=document.getElementById('nd').value||'5';
 N.className='msg';N.innerHTML='Sending<span class="spin"></span>';
 fetch('/notify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
 body:'text='+encodeURIComponent(t)+'&color='+encodeURIComponent(c)+'&size='+s+'&effect='+encodeURIComponent(e)+'&duration='+d})

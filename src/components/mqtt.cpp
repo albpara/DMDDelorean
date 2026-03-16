@@ -16,12 +16,12 @@ bool    panelOn    = true;
 uint8_t brightness = 25;   // overwritten from main's DEFAULT_BRIGHTNESS
 
 // Text notification state — filled by MQTT or web UI, consumed by loop()
-TextNotification textNotif = {"", 0xFFFF, 1, false, 5000, false};
+TextNotification textNotif = {"", 0xFFFF, 1, false, 5, false};
 
 /* =================================================================
  *  TEXT NOTIFICATION PARSER
  *  Accepts JSON or plain-text payload, arms textNotif for loop().
- *  JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5000}
+ *  JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
  *  Plain text: entire payload used as message with defaults.
  * ================================================================= */
 void applyTextNotification(const char *payload) {
@@ -33,7 +33,7 @@ void applyTextNotification(const char *payload) {
     textNotif.color      = 0xFFFF;
     textNotif.size       = 1;
     textNotif.rainbow    = false;
-    textNotif.durationMs = 5000;
+    textNotif.duration   = 5;
     textNotif.text[0]    = '\0';
 
     if (s.startsWith("{")) {
@@ -71,9 +71,9 @@ void applyTextNotification(const char *payload) {
         // effect
         if (s.indexOf("\"effect\":\"rainbow\"") >= 0) textNotif.rainbow = true;
 
-        // duration (ms)
+        // duration: loops for scrolling text, seconds for non-scrolling text
         int di = s.indexOf("\"duration\":");
-        if (di >= 0) textNotif.durationMs = (uint32_t)s.substring(di + 11).toInt();
+        if (di >= 0) textNotif.duration = (uint32_t)s.substring(di + 11).toInt();
     } else {
         // --- Plain-text payload ---
         s.toCharArray(textNotif.text, sizeof(textNotif.text));
@@ -83,7 +83,7 @@ void applyTextNotification(const char *payload) {
         textNotif.pending = true;
         Serial.printf("[NOTIFY] text='%s' size=%d rainbow=%d dur=%u\n",
                       textNotif.text, textNotif.size,
-                      (int)textNotif.rainbow, textNotif.durationMs);
+                      (int)textNotif.rainbow, textNotif.duration);
     }
 }
 

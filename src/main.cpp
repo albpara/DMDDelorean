@@ -191,15 +191,14 @@ void showMessage(const char *msg, uint16_t color, uint8_t size) {
 }
 
 /* =================================================================
- *  UTILITY — Show a timed/animated text notification on the panel.
- *  Supports fixed display or continuous scroll, plain colour or rainbow.
- *  durationMs == 0 : show once (scroll if text is wider than panel).
- *  durationMs  > 0 : display for that many milliseconds, animating hue
- *                    and scrolling if text is wider than the panel.
+ *  UTILITY — Show a text notification on the panel.
+ *  Supports fixed display or scrolling, plain colour or rainbow.
+ *  duration: if text is wider than panel, number of scroll loops.
+ *            otherwise, display time in seconds.
  *  Non-blocking during display: calls serviceWeb() each frame.
  * ================================================================= */
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t durationMs) {
+                      bool rainbow, uint32_t duration) {
     if (!dma_display || !msg || msg[0] == '\0') return;
     if (size < 1) size = 1;
     if (size > 3) size = 3;
@@ -210,26 +209,17 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
     int textW = len * cw;
     int cy    = (PANEL_RES_Y - ch) / 2;
     bool wide = (textW > TOTAL_WIDTH);
+    int hueShift = 0;
 
-    if (durationMs == 0) {
-        // One-shot: centre (or scroll once) without animation
-        if (!wide) {
-            int cx = (TOTAL_WIDTH - textW) / 2;
-            dma_display->fillScreen(0);
-            if (rainbow) {
-                drawRainbowText(msg, cx, cy, size, 0);
-            } else {
-                dma_display->setTextSize(size);
-                dma_display->setTextWrap(false);
-                dma_display->setTextColor(color);
-                dma_display->setCursor(cx, cy);
-                dma_display->print(msg);
-            }
-        } else {
-            for (int x = 0; x >= -textW; x--) {
+    if (wide) {
+        // duration means number of full right-to-left scroll loops.
+        uint32_t loops = (duration == 0) ? 1 : duration;
+        for (uint32_t l = 0; l < loops; l++) {
+            for (int x = TOTAL_WIDTH; x >= -textW; x--) {
                 dma_display->fillScreen(0);
                 if (rainbow) {
-                    drawRainbowText(msg, x, cy, size, 0);
+                    drawRainbowText(msg, x, cy, size, hueShift);
+                    hueShift = (hueShift + 8) % 360;
                 } else {
                     dma_display->setTextSize(size);
                     dma_display->setTextWrap(false);
@@ -244,28 +234,23 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
         return;
     }
 
-    // Timed display with optional animated rainbow and scrolling
+    // Non-scrolling text: duration is interpreted as seconds.
+    uint32_t seconds = (duration == 0) ? 1 : duration;
+    uint32_t durationMs = seconds * 1000UL;
     unsigned long start = millis();
-    int hueShift = 0;
-    int scrollX  = wide ? 0 : (TOTAL_WIDTH - textW) / 2;
-    int scrollDir = -1;
+    int cx = (TOTAL_WIDTH - textW) / 2;
 
     while (millis() - start < durationMs) {
         dma_display->fillScreen(0);
         if (rainbow) {
-            drawRainbowText(msg, scrollX, cy, size, hueShift);
+            drawRainbowText(msg, cx, cy, size, hueShift);
             hueShift = (hueShift + 8) % 360;
         } else {
             dma_display->setTextSize(size);
             dma_display->setTextWrap(false);
             dma_display->setTextColor(color);
-            dma_display->setCursor(scrollX, cy);
+            dma_display->setCursor(cx, cy);
             dma_display->print(msg);
-        }
-        if (wide) {
-            scrollX += scrollDir;
-            if (scrollX <= -textW)  scrollDir =  1;
-            if (scrollX >= 0)       scrollDir = -1;
         }
         serviceWeb();
         delay(SCROLL_STEP_MS);
@@ -659,7 +644,7 @@ void loop() {
     if (textNotif.pending) {
         textNotif.pending = false;
         showNotification(textNotif.text, textNotif.color, textNotif.size,
-                         textNotif.rainbow, textNotif.durationMs);
+                         textNotif.rainbow, textNotif.duration);
         if (dma_display) dma_display->clearScreen();
         return;
     }
