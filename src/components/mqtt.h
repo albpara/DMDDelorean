@@ -23,6 +23,13 @@ extern unsigned long mqttLastRetry;
 extern bool    panelOn;
 extern uint8_t brightness;
 
+/* Clock mode state/config (shared with main and wifi_portal) */
+extern bool     clockModeEnabled;
+extern uint16_t clockEveryNGifs;
+extern char     clockTz[64];
+extern volatile bool clockConfigDirty;
+extern volatile bool clockTimeValid;
+
 /* WiFi stability tracking (set by wifi_portal, read by mqtt) */
 extern unsigned long wifiConnectedAt;
 #define WIFI_STABLE_DELAY  3000
@@ -47,6 +54,9 @@ extern MatrixPanel_I2S_DMA *dma_display;
 // JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
 // Plain text: entire payload used as message with defaults.
 void applyTextNotification(const char *payload);
+void applyClockConfigPayload(const char *payload);
+void updateClockConfig(bool enabled, uint16_t every, const char *tz, bool persist);
+void loadClockConfig();
 
 void applyBrightness(uint8_t val);
 void applyPanelOn(bool on);

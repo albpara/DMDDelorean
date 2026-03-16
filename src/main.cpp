@@ -17,6 +17,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
+#include <time.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <AnimatedGIF.h>
 #include "components/mqtt.h"
@@ -87,9 +88,12 @@ size_t   gifBufLen[2]  = {0, 0};
 bool     gifBufOk[2]   = {false, false};
 int      playBuf       = 0;       // Buffer currently playing
 bool     hasDualBuf    = false;   // True when both buffers allocated
+volatile bool clearBeforeNextGifDraw = false;
 
 // Preload task coordination
 TaskHandle_t      preloadHandle = nullptr;
+TaskHandle_t      netTaskHandle = nullptr;
+TaskHandle_t      playbackHandle = nullptr;
 SemaphoreHandle_t sdMutex       = nullptr;
 volatile int plFileIdx = -1;     // File index the preload task should load
 volatile int plBufIdx  = -1;     // Buffer index to load into
@@ -122,6 +126,8 @@ int nextIdx() {
 #define CHAR_W  6   // Adafruit GFX default 5x7 font + 1px gap = 6px per char at size 1
 #define CHAR_H  8   // font height at size 1
 #define SCROLL_STEP_MS  30   // ms per pixel scroll step
+#define CLOCK_MIN_DISPLAY_SECONDS 10
+#define NTP_RETRY_MS 30000
 
 /* Convert hue (0–359°) to RGB565 — full saturation and value (HSV with S=V=1) */
 static uint16_t hue565(int hue) {
@@ -195,7 +201,7 @@ void showMessage(const char *msg, uint16_t color, uint8_t size) {
  *  Supports fixed display or scrolling, plain colour or rainbow.
  *  duration: if text is wider than panel, number of scroll loops.
  *            otherwise, display time in seconds.
- *  Non-blocking during display: calls serviceWeb() each frame.
+ *  Non-blocking for networking: WiFi/MQTT runs in a separate Core 0 task.
  * ================================================================= */
 void showNotification(const char *msg, uint16_t color, uint8_t size,
                       bool rainbow, uint32_t duration) {
@@ -227,7 +233,6 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
                     dma_display->setCursor(x, cy);
                     dma_display->print(msg);
                 }
-                serviceWeb();
                 delay(SCROLL_STEP_MS);
             }
         }
@@ -252,9 +257,112 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
             dma_display->setCursor(cx, cy);
             dma_display->print(msg);
         }
-        serviceWeb();
         delay(SCROLL_STEP_MS);
     }
+}
+
+/* =================================================================
+ *  CLOCK MODE — NTP + render helpers
+ * ================================================================= */
+static bool ntpConfigured = false;
+static unsigned long ntpLastAttempt = 0;
+static uint32_t gifsSinceClock = 0;
+
+static int textWidthPx(const char *s, uint8_t size) {
+    return (int)strlen(s) * CHAR_W * size;
+}
+
+static bool haveSyncedTime() {
+    time_t now = time(nullptr);
+    return now > 1700000000;  // sanity threshold (~2023)
+}
+
+static void ensureNtpSync() {
+    if (WiFi.status() != WL_CONNECTED) {
+        clockTimeValid = false;
+        return;
+    }
+
+    if (clockConfigDirty) {
+        ntpConfigured = false;
+        clockConfigDirty = false;
+    }
+
+    unsigned long nowMs = millis();
+    if (!ntpConfigured && (ntpLastAttempt == 0 || (nowMs - ntpLastAttempt) >= NTP_RETRY_MS)) {
+        configTzTime(clockTz, "pool.ntp.org", "time.nist.gov", "time.google.com");
+        ntpConfigured = true;
+        ntpLastAttempt = nowMs;
+        Serial.printf("[CLOCK] NTP config requested (TZ=%s)\n", clockTz);
+    }
+
+    clockTimeValid = haveSyncedTime();
+    if (!clockTimeValid && (nowMs - ntpLastAttempt) >= NTP_RETRY_MS) {
+        ntpConfigured = false;  // trigger another retry
+    }
+}
+
+static bool showClockMode(uint32_t minSecondsToShow, int waitBuf = -1) {
+    if (!clockModeEnabled) return false;
+    if (WiFi.status() != WL_CONNECTED) return false;
+    if (!clockTimeValid) return false;
+    if (!dma_display) return false;
+
+    unsigned long minEndAt = millis() + (minSecondsToShow * 1000UL);
+    for (;;) {
+        if (textNotif.pending) return false;
+        if (WiFi.status() != WL_CONNECTED) return false;
+
+        time_t now = time(nullptr);
+        if (now <= 1700000000) return false;
+
+        struct tm ti;
+        localtime_r(&now, &ti);
+
+        char hhmmss[9];
+        char dateBuf[11];
+        char sep = (ti.tm_sec % 2 == 0) ? ':' : ' ';
+        snprintf(hhmmss, sizeof(hhmmss), "%02d%c%02d%c%02d",
+                 ti.tm_hour, sep, ti.tm_min, sep, ti.tm_sec);
+        snprintf(dateBuf, sizeof(dateBuf), "%02d/%02d/%04d",
+                 ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
+
+        int w1 = textWidthPx(hhmmss, 2);
+        int w2 = textWidthPx(dateBuf, 1);
+        int x1 = (TOTAL_WIDTH - w1) / 2;
+        int x2 = (TOTAL_WIDTH - w2) / 2;
+        int y1 = 2;
+        int y2 = 22;
+
+        dma_display->fillScreen(0);
+        dma_display->setTextWrap(false);
+        dma_display->setTextSize(2);
+        dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        dma_display->setCursor(x1, y1);
+        dma_display->print(hhmmss);
+
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(dma_display->color565(180, 180, 180));
+        dma_display->setCursor(x2, y2);
+        dma_display->print(dateBuf);
+
+        bool minElapsed = ((long)(millis() - minEndAt) >= 0);
+        bool waitReady = (waitBuf < 0 || waitBuf > 1) ? true : gifBufOk[waitBuf];
+        if (minElapsed && waitReady) break;
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return true;
+}
+
+static bool shouldShowClockAfterGif() {
+    gifsSinceClock++;
+    if (!clockModeEnabled) return false;
+    if (clockEveryNGifs == 0) return false;
+    if (gifsSinceClock < clockEveryNGifs) return false;
+
+    ensureNtpSync();
+    return clockTimeValid && WiFi.status() == WL_CONNECTED && dma_display;
 }
 
 /* =================================================================
@@ -262,6 +370,11 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
  * ================================================================= */
 void GIFDraw(GIFDRAW *pDraw) {
     if (!dma_display) return;
+
+    if (clearBeforeNextGifDraw) {
+        dma_display->clearScreen();
+        clearBeforeNextGifDraw = false;
+    }
 
     uint16_t *pal = pDraw->pPalette;
     uint8_t  *px  = pDraw->pPixels;
@@ -468,21 +581,23 @@ void preloadTaskFn(void *) {
  * ================================================================= */
 void playFromBuffer(int bi) {
     if (!gifBufOk[bi]) return;
-    if (!panelOn) { delay(100); serviceWeb(); return; }
+    if (!panelOn) { vTaskDelay(pdMS_TO_TICKS(100)); return; }
 
     if (gif.open(gifBuf[bi], (int)gifBufLen[bi], GIFDraw)) {
         xOff = (TOTAL_WIDTH - gif.getCanvasWidth())  / 2;
         yOff = (PANEL_RES_Y - gif.getCanvasHeight()) / 2;
-        dma_display->clearScreen();
+        clearBeforeNextGifDraw = true;
 
         int d;
         while (gif.playFrame(false, &d) && !textNotif.pending) {
             unsigned long t = millis();
-            while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
+            while ((millis() - t) < (unsigned long)d) { yield(); }
         }
         gif.close();
+        clearBeforeNextGifDraw = false;
     } else {
         Serial.printf("[ERR] Decode failed (buf %d)\n", bi);
+        clearBeforeNextGifDraw = false;
     }
 }
 
@@ -491,7 +606,7 @@ void playFromBuffer(int bi) {
  * ================================================================= */
 void playFromFile(int fi) {
     if (fi < 0 || fi >= gifCount) return;
-    if (!panelOn) { delay(100); serviceWeb(); return; }
+    if (!panelOn) { vTaskDelay(pdMS_TO_TICKS(100)); return; }
     char path[256];
     if (!getGifPath(fi, path, sizeof(path))) return;
 
@@ -499,18 +614,105 @@ void playFromFile(int fi) {
         if (gif.open(path, fileOpen, fileClose, fileRead, fileSeek, GIFDraw)) {
             xOff = (TOTAL_WIDTH - gif.getCanvasWidth())  / 2;
             yOff = (PANEL_RES_Y - gif.getCanvasHeight()) / 2;
-            dma_display->clearScreen();
+            clearBeforeNextGifDraw = true;
 
             int d;
             while (gif.playFrame(false, &d) && !textNotif.pending) {
                 unsigned long t = millis();
-                while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
+                while ((millis() - t) < (unsigned long)d) { yield(); }
             }
             gif.close();
+            clearBeforeNextGifDraw = false;
         } else {
             Serial.printf("[ERR] Cannot open: %s\n", path);
+            clearBeforeNextGifDraw = false;
         }
         xSemaphoreGive(sdMutex);
+    }
+}
+
+/* =================================================================
+ *  NETWORK TASK — Core 0
+ *  Serves captive portal + DNS + MQTT independently from GIF rendering.
+ * ================================================================= */
+void networkTaskFn(void *) {
+    for (;;) {
+        serviceWeb();
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
+
+/* =================================================================
+ *  PLAYBACK TASK — Core 1
+ *  Main GIF/notification scheduler, isolated from network task.
+ * ================================================================= */
+void playbackTaskFn(void *) {
+    for (;;) {
+        ensureNtpSync();
+
+        // Text notification takes priority over GIF playback
+        if (textNotif.pending) {
+            textNotif.pending = false;
+            showNotification(textNotif.text, textNotif.color, textNotif.size,
+                             textNotif.rainbow, textNotif.duration);
+            if (dma_display) dma_display->clearScreen();
+            continue;
+        }
+
+        if (gifCount == 0) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        // Double-buffer mode (PSRAM)
+        if (hasDualBuf && gifBufOk[playBuf]) {
+            playFromBuffer(playBuf);
+            bool showClock = shouldShowClockAfterGif();
+
+            // Single-GIF shortcut: just replay from same buffer
+            if (gifCount == 1) {
+                if (showClock && showClockMode(CLOCK_MIN_DISPLAY_SECONDS, playBuf)) {
+                    gifsSinceClock = 0;
+                }
+                continue;
+            }
+
+            // Advance playlist
+            currentIdx = nextIdx();
+
+            // Swap buffers
+            int doneBuf = playBuf;
+            int nextBuf = 1 - playBuf;
+
+            if (showClock && showClockMode(CLOCK_MIN_DISPLAY_SECONDS, nextBuf)) {
+                gifsSinceClock = 0;
+            }
+
+            playBuf = nextBuf;
+
+            // If the next buffer isn't ready yet, block-load it
+            if (!gifBufOk[playBuf]) {
+                if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(5000))) {
+                    loadIntoBuffer(playBuf, currentIdx);
+                    xSemaphoreGive(sdMutex);
+                }
+            }
+
+            // Request background preload of the GIF *after* next
+            gifBufOk[doneBuf] = false;
+            plBufIdx  = doneBuf;
+            plFileIdx = nextIdx();
+            if (preloadHandle) xTaskNotifyGive(preloadHandle);
+
+            continue;
+        }
+
+        // File-based fallback (no PSRAM)
+        playFromFile(currentIdx);
+        if (shouldShowClockAfterGif() && showClockMode(CLOCK_MIN_DISPLAY_SECONDS)) {
+            gifsSinceClock = 0;
+        }
+        currentIdx = nextIdx();
     }
 }
 
@@ -633,60 +835,22 @@ void setup() {
         Serial.println("[OK] Preload task started on Core 0");
     }
 
+    // Network stack (portal + MQTT) on Core 0 for responsiveness
+    xTaskCreatePinnedToCore(
+        networkTaskFn, "Net", 6144, nullptr, 2, &netTaskHandle, 0);
+    Serial.println("[OK] Network task started on Core 0");
+
+    // GIF playback scheduler on Core 1
+    xTaskCreatePinnedToCore(
+        playbackTaskFn, "Playback", 6144, nullptr, 1, &playbackHandle, 1);
+    Serial.println("[OK] Playback task started on Core 1");
+
     Serial.println("[OK] Setup complete — starting playback\n");
 }
 
 /* =================================================================
- *  MAIN LOOP — plays GIFs sequentially, with seamless preloading
+ *  MAIN LOOP — idle (work runs in FreeRTOS tasks)
  * ================================================================= */
 void loop() {
-    /* ─── Text notification takes priority over GIF playback ─ */
-    if (textNotif.pending) {
-        textNotif.pending = false;
-        showNotification(textNotif.text, textNotif.color, textNotif.size,
-                         textNotif.rainbow, textNotif.duration);
-        if (dma_display) dma_display->clearScreen();
-        return;
-    }
-
-    if (gifCount == 0) {
-        serviceWeb();
-        delay(100);
-        return;
-    }
-
-    /* ─── Double-buffer mode (PSRAM) ─────────────────────── */
-    if (hasDualBuf && gifBufOk[playBuf]) {
-        playFromBuffer(playBuf);
-
-        // Single-GIF shortcut: just replay from same buffer
-        if (gifCount == 1) return;
-
-        // Advance playlist
-        currentIdx = nextIdx();
-
-        // Swap buffers
-        int doneBuf = playBuf;
-        playBuf = 1 - playBuf;
-
-        // If the next buffer isn't ready yet, block-load it
-        if (!gifBufOk[playBuf]) {
-            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(5000))) {
-                loadIntoBuffer(playBuf, currentIdx);
-                xSemaphoreGive(sdMutex);
-            }
-        }
-
-        // Request background preload of the GIF *after* next
-        gifBufOk[doneBuf] = false;
-        plBufIdx  = doneBuf;
-        plFileIdx = nextIdx();
-        xTaskNotifyGive(preloadHandle);
-
-        return;
-    }
-
-    /* ─── File-based fallback (no PSRAM) ─────────────────── */
-    playFromFile(currentIdx);
-    currentIdx = nextIdx();
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }

@@ -136,6 +136,20 @@ static void handleStatus() {
     json += brightness;
     json += ",\"max_brightness\":";
     json += MAX_BRIGHTNESS_VAL;
+
+    // Clock mode state
+    json += ",\"clock\":{\"enabled\":";
+    json += clockModeEnabled ? "true" : "false";
+    json += ",\"every\":";
+    json += clockEveryNGifs;
+    json += ",\"tz\":\"";
+    String tz = String(clockTz);
+    tz.replace("\"", "\\\"");
+    json += tz;
+    json += "\",\"synced\":";
+    json += clockTimeValid ? "true" : "false";
+    json += "}";
+
     json += '}';
     webServer.send(200, "application/json", json);
 }
@@ -204,6 +218,19 @@ static void handlePanel() {
     webServer.send(200, "application/json", resp);
 }
 
+static void handleClockSave() {
+    bool enabled = webServer.arg("enabled") == "1";
+    int every = webServer.arg("every").toInt();
+    String tz = webServer.arg("tz");
+
+    if (every < 1) every = 1;
+    if (every > 1000) every = 1000;
+    if (tz.length() == 0) tz = "UTC0";
+
+    updateClockConfig(enabled, (uint16_t)every, tz.c_str(), true);
+    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Clock settings saved\"}");
+}
+
 static void handleNotify() {
     String text   = webServer.arg("text");
     String color  = webServer.arg("color");   // "#RRGGBB" from color picker
@@ -256,6 +283,7 @@ void wifiSetup() {
     webServer.on("/status", HTTP_GET, handleStatus);
     webServer.on("/mqtt", HTTP_POST, handleMqttSave);
     webServer.on("/panel", HTTP_POST, handlePanel);
+    webServer.on("/clock", HTTP_POST, handleClockSave);
     webServer.on("/notify", HTTP_POST, handleNotify);
     webServer.on("/generate_204", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect);

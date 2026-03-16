@@ -5,21 +5,21 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DeLorean DMD</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px;max-width:420px;margin:0 auto}
-h2{color:#0ff;margin-bottom:12px;font-size:1.2em}
-h3{color:#8ab4f8;margin:18px 0 8px;font-size:1em;border-bottom:1px solid #333;padding-bottom:4px}
-label{display:block;margin:8px 0 2px;font-size:.85em;color:#aaa}
-input,select{width:100%;padding:8px;border:1px solid #333;border-radius:4px;background:#16213e;color:#e0e0e0;font-size:.95em}
-input[type=range]{padding:4px 0;background:transparent;border:none}
-button{padding:10px 16px;border:none;border-radius:4px;cursor:pointer;font-size:.95em;margin-top:8px;width:100%}
-.btn-scan{background:#0d7377;color:#fff}
-.btn-conn{background:#533483;color:#fff}
-.btn-mqtt{background:#1a6b3c;color:#fff}
-.btn-panel{background:#b45309;color:#fff}
-.btn-notify{background:#5b21b6;color:#fff}
-button:active{opacity:.7}
-.msg{margin-top:8px;padding:8px;border-radius:4px;background:#16213e;font-size:.85em;min-height:1.5em}
-.ok{color:#0f6}.err{color:#f55}
+body{font-family:ui-monospace,"Courier New",monospace;background:#040704;color:#9dff8a;padding:14px;max-width:420px;margin:0 auto;line-height:1.2;background-image:repeating-linear-gradient(180deg,rgba(120,255,120,.05),rgba(120,255,120,.05) 1px,transparent 1px,transparent 3px)}
+h2{color:#c8ff86;margin-bottom:10px;font-size:1.1em;letter-spacing:.06em;text-transform:uppercase;text-shadow:0 0 8px rgba(140,255,120,.35)}
+h3{color:#7cf8a0;margin:16px 0 6px;font-size:.92em;border-bottom:1px dashed #255a2f;padding-bottom:4px;letter-spacing:.04em}
+label{display:block;margin:7px 0 2px;font-size:.8em;color:#7dd789}
+input,select{width:100%;padding:8px;border:1px solid #2a6e37;border-radius:2px;background:#07120a;color:#c5ffb7;font-size:.9em}
+input[type=range]{padding:3px 0;background:transparent;border:none}
+button{padding:9px 12px;border:1px solid #2e8c43;border-radius:2px;cursor:pointer;font-size:.9em;margin-top:8px;width:100%;background:#0a2510;color:#c9ffb8}
+.btn-scan{background:#0f3218}
+.btn-conn{background:#11381d}
+.btn-mqtt{background:#144121}
+.btn-panel{background:#1b4e2a}
+.btn-clock{background:#1b3f50}
+button:active{opacity:.82}
+.msg{margin-top:8px;padding:8px;border-radius:2px;background:#061108;border:1px solid #1f5d2c;font-size:.8em;min-height:1.5em}
+.ok{color:#7dff9f}.err{color:#ff8b8b}
 select{margin-top:4px}
 .row{display:flex;align-items:center;gap:10px;margin-top:6px}
 .row label{margin:0;flex-shrink:0;min-width:50px}
@@ -27,16 +27,16 @@ select{margin-top:4px}
 .row span{min-width:32px;text-align:right;font-size:.9em}
 .toggle{position:relative;width:50px;height:26px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0}
-.toggle .sl{position:absolute;inset:0;background:#444;border-radius:13px;cursor:pointer;transition:.2s}
-.toggle .sl::before{content:'';position:absolute;width:20px;height:20px;left:3px;bottom:3px;background:#ccc;border-radius:50%;transition:.2s}
-.toggle input:checked+.sl{background:#0d7377}
+.toggle .sl{position:absolute;inset:0;background:#112315;border:1px solid #2a6e37;border-radius:13px;cursor:pointer;transition:.2s}
+.toggle .sl::before{content:'';position:absolute;width:20px;height:20px;left:2px;bottom:2px;background:#3d7f4f;border-radius:50%;transition:.2s}
+.toggle input:checked+.sl{background:#174f28}
 .toggle input:checked+.sl::before{transform:translateX(24px)}
-.spin::after{content:'';display:inline-block;width:12px;height:12px;border:2px solid #0ff;border-top-color:transparent;border-radius:50%;animation:sp .6s linear infinite;margin-left:6px;vertical-align:middle}
+.spin::after{content:'';display:inline-block;width:11px;height:11px;border:2px solid #8dff8e;border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;margin-left:6px;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 </style></head><body>
-<h2>&#x1F527; DeLorean DMD</h2>
+<h2>DeLorean DMD</h2>
 
-<h3>&#x1F4F6; WiFi</h3>
+<h3>WiFi</h3>
 <button class="btn-scan" onclick="scan()">Scan Networks</button>
 <select id="nets" style="display:none" onchange="document.getElementById('ssid').value=this.value"></select>
 <label for="ssid">SSID</label>
@@ -46,7 +46,7 @@ select{margin-top:4px}
 <button class="btn-conn" onclick="conn()">Connect</button>
 <div id="wst" class="msg">Ready</div>
 
-<h3>&#x1F4E1; MQTT</h3>
+<h3>MQTT</h3>
 <label for="ms">Server</label>
 <input id="ms" placeholder="e.g. 192.168.1.100">
 <label for="mp">Port</label>
@@ -62,10 +62,10 @@ select{margin-top:4px}
 <button class="btn-mqtt" onclick="mqttSave()">Save MQTT Settings</button>
 <div id="mst" class="msg"></div>
 
-<h3>&#x1F4BB; Panel Control</h3>
+<h3>Panel Control</h3>
 <div class="row">
 <label>Power</label>
-<div class="toggle"><input type="checkbox" id="pon" onchange="panelCtl()"><span class="sl"></span></div>
+<label class="toggle"><input type="checkbox" id="pon" onchange="panelCtl()"><span class="sl"></span></label>
 </div>
 <div class="row">
 <label>Bright</label>
@@ -75,27 +75,20 @@ select{margin-top:4px}
 <button class="btn-panel" onclick="panelCtl()">Apply</button>
 <div id="pst" class="msg"></div>
 
-<h3>&#x1F4AC; Text Notification</h3>
-<label for="nt">Message</label>
-<input id="nt" placeholder="Hello World">
+<h3>Clock Mode</h3>
 <div class="row">
-<label>Color</label>
-<input type="color" id="nc" value="#ffffff" style="width:50px;padding:2px;flex-shrink:0">
-<label style="margin:0 6px 0 10px">Size</label>
-<select id="ns" style="width:60px"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
-<label style="margin:0 6px 0 10px">Effect</label>
-<select id="ne"><option value="">None</option><option value="rainbow">Rainbow</option></select>
+<label>Enable</label>
+<label class="toggle"><input type="checkbox" id="cen"><span class="sl"></span></label>
 </div>
-<div class="row">
-<label>Duration</label>
-<input type="number" id="nd" value="5" style="width:90px" min="0" placeholder="loops / sec">
-<span style="font-size:.8em;margin-left:8px;color:#bbb">wide=loops, short=seconds</span>
-</div>
-<button class="btn-notify" onclick="sendNotify()">Send Notification</button>
-<div id="nst" class="msg"></div>
+<label for="ce">Show clock after N GIFs</label>
+<input id="ce" type="number" min="1" value="5" placeholder="5">
+<label for="ctz">Timezone (POSIX TZ)</label>
+<input id="ctz" placeholder="UTC0" value="UTC0">
+<button class="btn-clock" onclick="clockSave()">Save Clock Settings</button>
+<div id="cst" class="msg"></div>
 
 <script>
-var W=document.getElementById('wst'),M=document.getElementById('mst'),P=document.getElementById('pst');
+var W=document.getElementById('wst'),M=document.getElementById('mst'),P=document.getElementById('pst'),C=document.getElementById('cst');
 function scan(){
 W.className='msg';W.innerHTML='Scanning<span class="spin"></span>';
 fetch('/scan').then(r=>r.json()).then(d=>{
@@ -138,19 +131,16 @@ body:'on='+on+'&brightness='+br})
 P.className='msg '+(d.ok?'ok':'err');P.textContent=d.msg||'';
 }).catch(()=>{P.className='msg err';P.textContent='Request failed';});}
 
-function sendNotify(){
-var t=document.getElementById('nt').value;
-var N=document.getElementById('nst');
-if(!t){N.className='msg err';N.textContent='Enter a message';return;}
-var c=document.getElementById('nc').value;
-var s=document.getElementById('ns').value;
-var e=document.getElementById('ne').value;
-var d=document.getElementById('nd').value||'5';
-N.className='msg';N.innerHTML='Sending<span class="spin"></span>';
-fetch('/notify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-body:'text='+encodeURIComponent(t)+'&color='+encodeURIComponent(c)+'&size='+s+'&effect='+encodeURIComponent(e)+'&duration='+d})
-.then(r=>r.json()).then(d=>{N.className='msg '+(d.ok?'ok':'err');N.textContent=d.msg||'';
-}).catch(()=>{N.className='msg err';N.textContent='Request failed';});}
+function clockSave(){
+var en=document.getElementById('cen').checked?1:0;
+var ev=document.getElementById('ce').value||'5';
+var tz=document.getElementById('ctz').value||'UTC0';
+C.className='msg';C.innerHTML='Saving<span class="spin"></span>';
+fetch('/clock',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:'enabled='+en+'&every='+encodeURIComponent(ev)+'&tz='+encodeURIComponent(tz)})
+.then(r=>r.json()).then(d=>{
+C.className='msg '+(d.ok?'ok':'err');C.textContent=d.msg||'';
+}).catch(()=>{C.className='msg err';C.textContent='Request failed';});}
 
 fetch('/status').then(r=>r.json()).then(d=>{
 if(d.connected)W.innerHTML='<span class="ok">Connected to '+d.ssid+' &mdash; IP: '+d.ip+'</span>';
@@ -162,5 +152,12 @@ if(m.connected)M.innerHTML='<span class="ok">MQTT connected</span>';
 else if(m.server)M.innerHTML='<span class="err">MQTT not connected</span>';}
 document.getElementById('pon').checked=d.panel_on;
 document.getElementById('pbr').value=d.brightness;document.getElementById('bv').textContent=d.brightness;
+if(d.clock){
+document.getElementById('cen').checked=d.clock.enabled;
+document.getElementById('ce').value=d.clock.every||5;
+document.getElementById('ctz').value=d.clock.tz||'UTC0';
+C.className='msg '+(d.clock.synced?'ok':'err');
+C.textContent=d.clock.synced?'Clock synced (NTP OK)':'Clock not synced yet';
+}
 }).catch(()=>{});
 </script></body></html>)rawliteral";
