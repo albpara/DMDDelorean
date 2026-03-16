@@ -135,6 +135,39 @@ Wrap the `playFromBuffer`/`playFromFile` calls in an outer `for` loop. The GIF d
 ### Switching to random playback
 Replace the sequential `currentIdx = (currentIdx + 1) % gifList.size()` with `currentIdx = esp_random() % gifList.size()` and update the preload target accordingly.
 
+### Text notification system (MQTT & web UI)
+
+A `TextNotification` struct (defined in `mqtt.h`) is shared between the MQTT module and `main.cpp`. Fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | `char[256]` | Message to display |
+| `color` | `uint16_t` | RGB565 foreground colour |
+| `size` | `uint8_t` | Font scale 1–3 (Adafruit GFX `setTextSize`) |
+| `rainbow` | `bool` | Animate each character in a different hue |
+| `durationMs` | `uint32_t` | Display time in ms; 0 = scroll once |
+| `pending` | `volatile bool` | Set by MQTT/web, cleared by `loop()` |
+
+**MQTT topic:** `{topic}/notify` (e.g. `delorean-dmd/notify`)  
+**Payload (JSON):**
+```json
+{"text":"Hello!","color":"#FF8800","size":2,"effect":"rainbow","duration":5000}
+```
+All fields except `text` are optional and fall back to defaults (`color=#FFFFFF`, `size=1`, no rainbow, `duration=5000 ms`).
+
+**Web UI:** The captive portal includes a *Text Notification* section — fill in the message, pick a colour, size (1–3), effect, and duration, then click **Send Notification**.
+
+**`showMessage` signature** (used internally for startup messages):
+```cpp
+void showMessage(const char *msg, uint16_t color, uint8_t size = 1);
+```
+
+**`showNotification` function** (used by `loop()` for MQTT/web notifications):
+```cpp
+void showNotification(const char *msg, uint16_t color, uint8_t size,
+                      bool rainbow, uint32_t durationMs);
+```
+
 ---
 
 ## Build & Flash
