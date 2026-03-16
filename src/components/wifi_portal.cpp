@@ -204,6 +204,36 @@ static void handlePanel() {
     webServer.send(200, "application/json", resp);
 }
 
+static void handleNotify() {
+    String text   = webServer.arg("text");
+    String color  = webServer.arg("color");   // "#RRGGBB" hex
+    int    size   = webServer.arg("size").toInt();
+    String effect = webServer.arg("effect");
+    uint32_t dur  = (uint32_t)webServer.arg("duration").toInt();
+
+    if (text.length() == 0) {
+        webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"No text\"}");
+        return;
+    }
+    if (size < 1 || size > 3) size = 1;
+
+    text.toCharArray(textNotif.text, sizeof(textNotif.text));
+    textNotif.color      = 0xFFFF;
+    if (color.length() == 7 && color[0] == '#') {
+        long v = strtol(color.c_str() + 1, nullptr, 16);
+        uint8_t r = (uint8_t)((v >> 16) & 0xFF);
+        uint8_t g = (uint8_t)((v >> 8)  & 0xFF);
+        uint8_t b = (uint8_t)( v        & 0xFF);
+        if (dma_display) textNotif.color = dma_display->color565(r, g, b);
+    }
+    textNotif.size       = (uint8_t)size;
+    textNotif.rainbow    = (effect == "rainbow");
+    textNotif.durationMs = dur;
+    textNotif.pending    = true;
+
+    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Notification queued\"}");
+}
+
 static void handleNotFound() {
     if (apMode) {
         handleCaptiveRedirect();
@@ -223,6 +253,7 @@ void wifiSetup() {
     webServer.on("/status", HTTP_GET, handleStatus);
     webServer.on("/mqtt", HTTP_POST, handleMqttSave);
     webServer.on("/panel", HTTP_POST, handlePanel);
+    webServer.on("/notify", HTTP_POST, handleNotify);
     webServer.on("/generate_204", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/connecttest.txt", HTTP_GET, handleCaptiveRedirect);

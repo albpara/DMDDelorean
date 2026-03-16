@@ -15,6 +15,9 @@ unsigned long mqttLastRetry = 0;
 bool    panelOn    = true;
 uint8_t brightness = 25;   // overwritten from main's DEFAULT_BRIGHTNESS
 
+// Text notification state — filled by MQTT or web UI, consumed by loop()
+TextNotification textNotif = {"", 0xFFFF, 1, false, 5000, false};
+
 /* =================================================================
  *  BRIGHTNESS / POWER HELPERS
  * ================================================================= */
@@ -83,7 +86,7 @@ void mqttPublishDiscovery() {
 }
 
 /* =================================================================
- *  CALLBACK — handles set commands from Home Assistant
+ *  CALLBACK — handles set commands from Home Assistant / raw MQTT
  * ================================================================= */
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     char msg[length + 1];
@@ -91,8 +94,9 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     msg[length] = '\0';
 
     String t(topic);
-    String cmdTopic = mqttTopic + "/set";
-    String brTopic  = mqttTopic + "/brightness/set";
+    String cmdTopic    = mqttTopic + "/set";
+    String brTopic     = mqttTopic + "/brightness/set";
+    String notifyTopic = mqttTopic + "/notify";
 
     if (t == cmdTopic) {
         String s(msg);
@@ -110,6 +114,62 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
         if (val >= 0 && val <= 255) {
             applyBrightness((uint8_t)val);
             mqttPublishState();
+        }
+    } else if (t == notifyTopic) {
+        // Accepts: {"text":"Hello","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5000}
+        String s(msg);
+
+        // Reset to defaults before parsing
+        textNotif.color      = 0xFFFF;
+        textNotif.size       = 1;
+        textNotif.rainbow    = false;
+        textNotif.durationMs = 5000;
+        textNotif.text[0]    = '\0';
+
+        // text
+        int ti = s.indexOf("\"text\":");
+        if (ti >= 0) {
+            int tq1 = s.indexOf('"', ti + 7);
+            if (tq1 >= 0) {
+                int tq2 = s.indexOf('"', tq1 + 1);
+                if (tq2 > tq1) {
+                    String tv = s.substring(tq1 + 1, tq2);
+                    tv.toCharArray(textNotif.text, sizeof(textNotif.text));
+                }
+            }
+        }
+
+        // color — "#RRGGBB" hex string
+        int ci = s.indexOf("\"color\":\"#");
+        if (ci >= 0 && (ci + 16) <= (int)s.length()) {
+            char hex[7];
+            s.substring(ci + 10, ci + 16).toCharArray(hex, sizeof(hex));
+            long v = strtol(hex, nullptr, 16);
+            uint8_t r = (uint8_t)((v >> 16) & 0xFF);
+            uint8_t g = (uint8_t)((v >> 8)  & 0xFF);
+            uint8_t b = (uint8_t)( v        & 0xFF);
+            if (dma_display) textNotif.color = dma_display->color565(r, g, b);
+        }
+
+        // size (1–3)
+        int si = s.indexOf("\"size\":");
+        if (si >= 0) {
+            int sv = s.substring(si + 7).toInt();
+            if (sv >= 1 && sv <= 3) textNotif.size = (uint8_t)sv;
+        }
+
+        // effect
+        if (s.indexOf("\"effect\":\"rainbow\"") >= 0) textNotif.rainbow = true;
+
+        // duration (ms)
+        int di = s.indexOf("\"duration\":");
+        if (di >= 0) textNotif.durationMs = (uint32_t)s.substring(di + 11).toInt();
+
+        if (textNotif.text[0] != '\0') {
+            textNotif.pending = true;
+            Serial.printf("[MQTT] Notify: \"%s\" size=%d rainbow=%d dur=%u\n",
+                          textNotif.text, textNotif.size,
+                          (int)textNotif.rainbow, textNotif.durationMs);
         }
     }
 }
@@ -147,10 +207,13 @@ void mqttConnect() {
     if (ok) {
         Serial.println("[MQTT] Connected!");
         mqttClient.publish(availTopic.c_str(), "online", true);
-        String cmdTopic = mqttTopic + "/set";
-        String brTopic  = mqttTopic + "/brightness/set";
+        String cmdTopic    = mqttTopic + "/set";
+        String brTopic     = mqttTopic + "/brightness/set";
+        String notifyTopic = mqttTopic + "/notify";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
+        mqttClient.subscribe(notifyTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
     } else {

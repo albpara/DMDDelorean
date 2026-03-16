@@ -113,29 +113,64 @@ int nextIdx() {
 }
 
 /* =================================================================
- *  UTILITY — Show a single-line message on the panel (centered + scroll)
- *  Short text: centred on screen.
- *  Long  text: starts centred, scrolls left until the last character
- *              disappears off the left edge, then returns.
+ *  UTILITY — Show a single-line message on the panel
+ *  Short text (fits on screen): centred.
+ *  Long  text: starts at left edge, scrolls left until fully off, then returns.
+ *  Optional font size (1–3) and rainbow colour effect.
  *  Blocking call — returns only when the full scroll has finished.
  * ================================================================= */
-#define CHAR_W  6   // Adafruit GFX default 5x7 font + 1px gap = 6px per char
-#define CHAR_H  8   // font height
+#define CHAR_W  6   // Adafruit GFX default 5x7 font + 1px gap = 6px per char at size 1
+#define CHAR_H  8   // font height at size 1
 #define SCROLL_STEP_MS  30   // ms per pixel scroll step
 
-void showMessage(const char *msg, uint16_t color = 0xFFFF) {
+/* Convert hue (0–359°) to RGB565 — full saturation and value (HSV with S=V=1) */
+static uint16_t hue565(int hue) {
+    hue = ((hue % 360) + 360) % 360;
+    int   hi = hue / 60;
+    uint8_t f = (uint8_t)(255 * (hue % 60) / 60);
+    uint8_t r, g, b;
+    switch (hi) {
+        case 0: r=255; g=f;     b=0;     break;
+        case 1: r=255-f; g=255; b=0;     break;
+        case 2: r=0;   g=255;   b=f;     break;
+        case 3: r=0;   g=255-f; b=255;   break;
+        case 4: r=f;   g=0;     b=255;   break;
+        default:r=255; g=0;     b=255-f; break;
+    }
+    return dma_display ? dma_display->color565(r, g, b) : 0xFFFF;
+}
+
+/* Draw each character of msg in a different rainbow hue, starting at (x, y) */
+static void drawRainbowText(const char *msg, int x, int y, uint8_t size, int hueShift) {
+    int cw  = CHAR_W * size;
+    int len = (int)strlen(msg);
+    if (len == 0) return;
+    dma_display->setTextSize(size);
+    dma_display->setTextWrap(false);
+    for (int i = 0; i < len; i++) {
+        int hue = (hueShift + i * (360 / len)) % 360;
+        dma_display->setTextColor(hue565(hue));
+        dma_display->setCursor(x + i * cw, y);
+        dma_display->print((char)msg[i]);
+    }
+}
+
+void showMessage(const char *msg, uint16_t color, uint8_t size) {
     if (!dma_display) return;
+    if (size < 1) size = 1;
+    if (size > 3) size = 3;
 
-    int len    = (int)strlen(msg);
-    int textW  = len * CHAR_W;                 // total pixel width of message
-    int cy     = (PANEL_RES_Y - CHAR_H) / 2;  // vertical centre
+    int cw    = CHAR_W * size;
+    int ch    = CHAR_H * size;
+    int len   = (int)strlen(msg);
+    int textW = len * cw;
+    int cy    = (PANEL_RES_Y - ch) / 2;
 
-    dma_display->setTextSize(1);
+    dma_display->setTextSize(size);
     dma_display->setTextWrap(false);
     dma_display->setTextColor(color);
 
     if (textW <= TOTAL_WIDTH) {
-        // Fits on screen — just centre it
         int cx = (TOTAL_WIDTH - textW) / 2;
         dma_display->fillScreen(0);
         dma_display->setCursor(cx, cy);
@@ -143,15 +178,96 @@ void showMessage(const char *msg, uint16_t color = 0xFFFF) {
         return;
     }
 
-    // Text wider than panel — scroll from centred position to fully off-left
-    int startX = (TOTAL_WIDTH - textW) / 2;   // centred (will be negative for very long text, clamp to 0)
-    if (startX < 0) startX = 0;               // begin just at left edge
-    int endX   = -textW;                       // last char just disappeared off the left
+    // Text wider than panel — scroll from left edge to fully off-screen
+    int startX = 0;
+    int endX   = -textW;
 
     for (int x = startX; x >= endX; x--) {
         dma_display->fillScreen(0);
         dma_display->setCursor(x, cy);
         dma_display->print(msg);
+        delay(SCROLL_STEP_MS);
+    }
+}
+
+/* =================================================================
+ *  UTILITY — Show a timed/animated text notification on the panel.
+ *  Supports fixed display or continuous scroll, plain colour or rainbow.
+ *  durationMs == 0 : show once (scroll if text is wider than panel).
+ *  durationMs  > 0 : display for that many milliseconds, animating hue
+ *                    and scrolling if text is wider than the panel.
+ *  Non-blocking during display: calls serviceWeb() each frame.
+ * ================================================================= */
+void showNotification(const char *msg, uint16_t color, uint8_t size,
+                      bool rainbow, uint32_t durationMs) {
+    if (!dma_display || !msg || msg[0] == '\0') return;
+    if (size < 1) size = 1;
+    if (size > 3) size = 3;
+
+    int cw    = CHAR_W * size;
+    int ch    = CHAR_H * size;
+    int len   = (int)strlen(msg);
+    int textW = len * cw;
+    int cy    = (PANEL_RES_Y - ch) / 2;
+    bool wide = (textW > TOTAL_WIDTH);
+
+    if (durationMs == 0) {
+        // One-shot: centre (or scroll once) without animation
+        if (!wide) {
+            int cx = (TOTAL_WIDTH - textW) / 2;
+            dma_display->fillScreen(0);
+            if (rainbow) {
+                drawRainbowText(msg, cx, cy, size, 0);
+            } else {
+                dma_display->setTextSize(size);
+                dma_display->setTextWrap(false);
+                dma_display->setTextColor(color);
+                dma_display->setCursor(cx, cy);
+                dma_display->print(msg);
+            }
+        } else {
+            for (int x = 0; x >= -textW; x--) {
+                dma_display->fillScreen(0);
+                if (rainbow) {
+                    drawRainbowText(msg, x, cy, size, 0);
+                } else {
+                    dma_display->setTextSize(size);
+                    dma_display->setTextWrap(false);
+                    dma_display->setTextColor(color);
+                    dma_display->setCursor(x, cy);
+                    dma_display->print(msg);
+                }
+                serviceWeb();
+                delay(SCROLL_STEP_MS);
+            }
+        }
+        return;
+    }
+
+    // Timed display with optional animated rainbow and scrolling
+    unsigned long start = millis();
+    int hueShift = 0;
+    int scrollX  = wide ? 0 : (TOTAL_WIDTH - textW) / 2;
+    int scrollDir = -1;
+
+    while (millis() - start < durationMs) {
+        dma_display->fillScreen(0);
+        if (rainbow) {
+            drawRainbowText(msg, scrollX, cy, size, hueShift);
+            hueShift = (hueShift + 8) % 360;
+        } else {
+            dma_display->setTextSize(size);
+            dma_display->setTextWrap(false);
+            dma_display->setTextColor(color);
+            dma_display->setCursor(scrollX, cy);
+            dma_display->print(msg);
+        }
+        if (wide) {
+            scrollX += scrollDir;
+            if (scrollX <= -textW)  scrollDir =  1;
+            if (scrollX >= 0)       scrollDir = -1;
+        }
+        serviceWeb();
         delay(SCROLL_STEP_MS);
     }
 }
@@ -375,7 +491,7 @@ void playFromBuffer(int bi) {
         dma_display->clearScreen();
 
         int d;
-        while (gif.playFrame(false, &d)) {
+        while (gif.playFrame(false, &d) && !textNotif.pending) {
             unsigned long t = millis();
             while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
         }
@@ -401,7 +517,7 @@ void playFromFile(int fi) {
             dma_display->clearScreen();
 
             int d;
-            while (gif.playFrame(false, &d)) {
+            while (gif.playFrame(false, &d) && !textNotif.pending) {
                 unsigned long t = millis();
                 while ((millis() - t) < (unsigned long)d) { serviceWeb(); yield(); }
             }
@@ -539,6 +655,15 @@ void setup() {
  *  MAIN LOOP — plays GIFs sequentially, with seamless preloading
  * ================================================================= */
 void loop() {
+    /* ─── Text notification takes priority over GIF playback ─ */
+    if (textNotif.pending) {
+        textNotif.pending = false;
+        showNotification(textNotif.text, textNotif.color, textNotif.size,
+                         textNotif.rainbow, textNotif.durationMs);
+        if (dma_display) dma_display->clearScreen();
+        return;
+    }
+
     if (gifCount == 0) {
         serviceWeb();
         delay(100);

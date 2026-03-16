@@ -17,7 +17,7 @@ extern unsigned long wifiConnectedAt;
 /* Provided by main.cpp */
 class MatrixPanel_I2S_DMA;
 extern MatrixPanel_I2S_DMA *dma_display;
-void showMessage(const char *msg, uint16_t color);
+void showMessage(const char *msg, uint16_t color, uint8_t size = 1);
 
 void wifiSetup();
 void serviceWeb();
