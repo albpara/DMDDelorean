@@ -15,63 +15,13 @@ unsigned long mqttLastRetry = 0;
 bool    panelOn    = true;
 uint8_t brightness = 25;   // overwritten from main's DEFAULT_BRIGHTNESS
 
-// Text notification state
-TextNotification textNotif = {"", 0xFFFF, 1, EFFECT_SCROLL, 0, false};
+// Text notification state — filled by MQTT or web UI, consumed by loop()
+TextNotification textNotif = {"", 0xFFFF, 1, false, 5000, false};
 
 /* =================================================================
- *  TEXT NOTIFICATION HELPERS
- * ================================================================= */
-static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-    return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (b >> 3);
-}
-
-// Extract a JSON string value: "key":"value"
-static bool jsonGetString(const String &json, const char *key, char *out, size_t maxLen) {
-    String search = String("\"") + key + "\":\"";
-    int idx = json.indexOf(search);
-    if (idx < 0) return false;
-    idx += search.length();
-    int end = json.indexOf('"', idx);
-    if (end < 0) return false;
-    String val = json.substring(idx, end);
-    strncpy(out, val.c_str(), maxLen - 1);
-    out[maxLen - 1] = '\0';
-    return true;
-}
-
-// Extract a JSON integer value: "key":number
-static bool jsonGetInt(const String &json, const char *key, int32_t *out) {
-    String search = String("\"") + key + "\":";
-    int idx = json.indexOf(search);
-    if (idx < 0) return false;
-    idx += search.length();
-    while (idx < (int)json.length() && json[idx] == ' ') idx++;
-    *out = (int32_t)json.substring(idx).toInt();
-    return true;
-}
-
-// Extract a JSON color array: "color":[r,g,b]
-static bool jsonGetColorArray(const String &json, uint8_t *r, uint8_t *g, uint8_t *b) {
-    String search = "\"color\":[";
-    int idx = json.indexOf(search);
-    if (idx < 0) return false;
-    idx += search.length();
-    int end = json.indexOf(']', idx);
-    if (end < 0) return false;
-    String arr = json.substring(idx, end);
-    int c1 = arr.indexOf(',');
-    int c2 = arr.indexOf(',', c1 + 1);
-    if (c1 < 0 || c2 < 0) return false;
-    *r = (uint8_t)arr.substring(0, c1).toInt();
-    *g = (uint8_t)arr.substring(c1 + 1, c2).toInt();
-    *b = (uint8_t)arr.substring(c2 + 1).toInt();
-    return true;
-}
-
-/* =================================================================
- *  APPLY TEXT NOTIFICATION
- *  Parses a plain-text or JSON payload and arms textNotif.
- *  JSON: {"text":"…","color":[r,g,b],"size":1,"effect":"scroll","duration":8000}
+ *  TEXT NOTIFICATION PARSER
+ *  Accepts JSON or plain-text payload, arms textNotif for loop().
+ *  JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5000}
  *  Plain text: entire payload used as message with defaults.
  * ================================================================= */
 void applyTextNotification(const char *payload) {
@@ -79,49 +29,61 @@ void applyTextNotification(const char *payload) {
     s.trim();
     if (s.length() == 0) return;
 
-    // Reset to safe defaults
-    textNotif.color     = 0xFFFF;   // white
-    textNotif.size      = 1;
-    textNotif.effect    = EFFECT_SCROLL;
-    textNotif.durationMs = 0;
+    // Reset to defaults
+    textNotif.color      = 0xFFFF;
+    textNotif.size       = 1;
+    textNotif.rainbow    = false;
+    textNotif.durationMs = 5000;
+    textNotif.text[0]    = '\0';
 
     if (s.startsWith("{")) {
         // --- JSON payload ---
-        char txt[256] = "";
-        jsonGetString(s, "text", txt, sizeof(txt));
-        strncpy(textNotif.text, txt, sizeof(textNotif.text) - 1);
-        textNotif.text[sizeof(textNotif.text) - 1] = '\0';
-
-        uint8_t r = 255, g = 255, b = 255;
-        if (jsonGetColorArray(s, &r, &g, &b))
-            textNotif.color = rgb565(r, g, b);
-
-        int32_t sz = 1;
-        if (jsonGetInt(s, "size", &sz)) {
-            if (sz < 1) sz = 1;
-            if (sz > 3) sz = 3;
-            textNotif.size = (uint8_t)sz;
+        // text
+        int ti = s.indexOf("\"text\":");
+        if (ti >= 0) {
+            int tq1 = s.indexOf('"', ti + 7);
+            if (tq1 >= 0) {
+                int tq2 = s.indexOf('"', tq1 + 1);
+                if (tq2 > tq1)
+                    s.substring(tq1 + 1, tq2).toCharArray(textNotif.text, sizeof(textNotif.text));
+            }
         }
 
-        char eff[16] = "scroll";
-        jsonGetString(s, "effect", eff, sizeof(eff));
-        if (strcmp(eff, "static") == 0)     textNotif.effect = EFFECT_STATIC;
-        else if (strcmp(eff, "blink") == 0) textNotif.effect = EFFECT_BLINK;
-        else                                textNotif.effect = EFFECT_SCROLL;
+        // color — "#RRGGBB"
+        int ci = s.indexOf("\"color\":\"#");
+        if (ci >= 0 && (ci + 16) <= (int)s.length()) {
+            char hex[7];
+            s.substring(ci + 10, ci + 16).toCharArray(hex, sizeof(hex));
+            long v = strtol(hex, nullptr, 16);
+            uint8_t r = (uint8_t)((v >> 16) & 0xFF);
+            uint8_t g = (uint8_t)((v >> 8)  & 0xFF);
+            uint8_t b = (uint8_t)( v        & 0xFF);
+            if (dma_display) textNotif.color = dma_display->color565(r, g, b);
+        }
 
-        int32_t dur = 0;
-        if (jsonGetInt(s, "duration", &dur) && dur > 0)
-            textNotif.durationMs = (uint32_t)dur;
+        // size (1–3)
+        int si = s.indexOf("\"size\":");
+        if (si >= 0) {
+            int sv = s.substring(si + 7).toInt();
+            if (sv >= 1 && sv <= 3) textNotif.size = (uint8_t)sv;
+        }
+
+        // effect
+        if (s.indexOf("\"effect\":\"rainbow\"") >= 0) textNotif.rainbow = true;
+
+        // duration (ms)
+        int di = s.indexOf("\"duration\":");
+        if (di >= 0) textNotif.durationMs = (uint32_t)s.substring(di + 11).toInt();
     } else {
         // --- Plain-text payload ---
-        strncpy(textNotif.text, s.c_str(), sizeof(textNotif.text) - 1);
-        textNotif.text[sizeof(textNotif.text) - 1] = '\0';
+        s.toCharArray(textNotif.text, sizeof(textNotif.text));
     }
 
-    if (strlen(textNotif.text) > 0) {
-        textNotif.active = true;
-        Serial.printf("[NOTIFY] text='%s' size=%d effect=%d dur=%u\n",
-                      textNotif.text, textNotif.size, textNotif.effect, textNotif.durationMs);
+    if (textNotif.text[0] != '\0') {
+        textNotif.pending = true;
+        Serial.printf("[NOTIFY] text='%s' size=%d rainbow=%d dur=%u\n",
+                      textNotif.text, textNotif.size,
+                      (int)textNotif.rainbow, textNotif.durationMs);
     }
 }
 
@@ -193,7 +155,7 @@ void mqttPublishDiscovery() {
 }
 
 /* =================================================================
- *  CALLBACK — handles set commands from Home Assistant
+ *  CALLBACK — handles set commands from Home Assistant / raw MQTT
  * ================================================================= */
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     char msg[length + 1];
@@ -205,9 +167,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String brTopic     = mqttTopic + "/brightness/set";
     String notifyTopic = mqttTopic + "/notify";
 
-    if (t == notifyTopic) {
-        applyTextNotification(msg);
-    } else if (t == cmdTopic) {
+    if (t == cmdTopic) {
         String s(msg);
         if (s.indexOf("\"ON\"") >= 0) applyPanelOn(true);
         else if (s.indexOf("\"OFF\"") >= 0) applyPanelOn(false);
@@ -224,6 +184,9 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
             applyBrightness((uint8_t)val);
             mqttPublishState();
         }
+    } else if (t == notifyTopic) {
+        // Delegate to shared parser: JSON or plain-text payload
+        applyTextNotification(msg);
     }
 }
 
@@ -266,6 +229,7 @@ void mqttConnect() {
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
         mqttClient.subscribe(notifyTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
     } else {

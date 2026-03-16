@@ -205,30 +205,30 @@ static void handlePanel() {
 }
 
 static void handleNotify() {
-    String text     = webServer.arg("text");
-    String colorStr = webServer.arg("color");    // "r,g,b"
-    String effectStr = webServer.arg("effect");  // scroll / static / blink
-    int    size     = webServer.arg("size").toInt();
-    int    dur      = webServer.arg("duration").toInt();
+    String text   = webServer.arg("text");
+    String color  = webServer.arg("color");   // "#RRGGBB" from color picker
+    int    size   = webServer.arg("size").toInt();
+    String effect = webServer.arg("effect");
+    uint32_t dur  = (uint32_t)webServer.arg("duration").toInt();
 
     if (text.length() == 0) {
-        webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"text required\"}");
+        webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"No text\"}");
         return;
     }
+    if (size < 1 || size > 3) size = 1;
 
-    // Escape the text value for safe JSON embedding
+    // Build a JSON payload and delegate to the shared parser
     String escaped = text;
     escaped.replace("\\", "\\\\");
     escaped.replace("\"", "\\\"");
 
-    // Build a JSON payload and delegate to the shared parser
     String payload = "{\"text\":\"" + escaped + "\"";
-    if (colorStr.length() > 0)
-        payload += ",\"color\":[" + colorStr + "]";
+    if (color.length() == 7 && color[0] == '#')
+        payload += ",\"color\":\"" + color + "\"";
     if (size >= 1 && size <= 3)
         payload += ",\"size\":" + String(size);
-    if (effectStr.length() > 0)
-        payload += ",\"effect\":\"" + effectStr + "\"";
+    if (effect.length() > 0)
+        payload += ",\"effect\":\"" + effect + "\"";
     if (dur > 0)
         payload += ",\"duration\":" + String(dur);
     payload += "}";

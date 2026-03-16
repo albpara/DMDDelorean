@@ -16,7 +16,7 @@ button{padding:10px 16px;border:none;border-radius:4px;cursor:pointer;font-size:
 .btn-conn{background:#533483;color:#fff}
 .btn-mqtt{background:#1a6b3c;color:#fff}
 .btn-panel{background:#b45309;color:#fff}
-.btn-notify{background:#7c3aed;color:#fff}
+.btn-notify{background:#5b21b6;color:#fff}
 button:active{opacity:.7}
 .msg{margin-top:8px;padding:8px;border-radius:4px;background:#16213e;font-size:.85em;min-height:1.5em}
 .ok{color:#0f6}.err{color:#f55}
@@ -75,26 +75,23 @@ select{margin-top:4px}
 <button class="btn-panel" onclick="panelCtl()">Apply</button>
 <div id="pst" class="msg"></div>
 
-<h3>&#x1F4AC; Text Display</h3>
-<label for="ntxt">Message</label>
-<input id="ntxt" placeholder="Hello World!">
-<div class="row">
-<label>Size</label>
-<select id="nsize" style="flex:1"><option value="1">Small (1)</option><option value="2">Medium (2)</option><option value="3">Large (3)</option></select>
-</div>
+<h3>&#x1F4AC; Text Notification</h3>
+<label for="nt">Message</label>
+<input id="nt" placeholder="Hello World">
 <div class="row">
 <label>Color</label>
-<input type="color" id="ncol" value="#ffffff" style="flex:1;height:36px;padding:2px">
+<input type="color" id="nc" value="#ffffff" style="width:50px;padding:2px;flex-shrink:0">
+<label style="margin:0 6px 0 10px">Size</label>
+<select id="ns" style="width:60px"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+<label style="margin:0 6px 0 10px">Effect</label>
+<select id="ne"><option value="">None</option><option value="rainbow">Rainbow</option></select>
 </div>
 <div class="row">
-<label>Effect</label>
-<select id="neff" style="flex:1"><option value="scroll">Scroll</option><option value="static">Static</option><option value="blink">Blink</option></select>
+<label>Duration</label>
+<input type="number" id="nd" value="5000" style="width:90px" min="0" placeholder="ms">
+<span style="font-size:.8em;margin-left:8px;color:#bbb">ms &nbsp;(0 = scroll once)</span>
 </div>
-<div class="row">
-<label>Dur(ms)</label>
-<input type="number" id="ndur" value="8000" min="500" style="flex:1" placeholder="8000">
-</div>
-<button class="btn-notify" onclick="sendNotify()">Show Text</button>
+<button class="btn-notify" onclick="sendNotify()">Send Notification</button>
 <div id="nst" class="msg"></div>
 
 <script>
@@ -139,25 +136,24 @@ fetch('/panel',{method:'POST',headers:{'Content-Type':'application/x-www-form-ur
 body:'on='+on+'&brightness='+br})
 .then(r=>r.json()).then(d=>{
 P.className='msg '+(d.ok?'ok':'err');P.textContent=d.msg||'';
-}).catch(()=>{P.className='msg err';P.textContent='Request failed'});}
+}).catch(()=>{P.className='msg err';P.textContent='Request failed';});}
 
 function sendNotify(){
+var t=document.getElementById('nt').value;
 var N=document.getElementById('nst');
-var txt=document.getElementById('ntxt').value;
-if(!txt){N.className='msg err';N.textContent='Enter a message';return;}
-var col=document.getElementById('ncol').value;
-var r=parseInt(col.substr(1,2),16),g=parseInt(col.substr(3,2),16),b=parseInt(col.substr(5,2),16);
-var body='text='+encodeURIComponent(txt)
-+'&color='+r+','+g+','+b
-+'&effect='+encodeURIComponent(document.getElementById('neff').value)
-+'&size='+document.getElementById('nsize').value
-+'&duration='+document.getElementById('ndur').value;
+if(!t){N.className='msg err';N.textContent='Enter a message';return;}
+var c=document.getElementById('nc').value;
+var s=document.getElementById('ns').value;
+var e=document.getElementById('ne').value;
+var d=document.getElementById('nd').value||'5000';
 N.className='msg';N.innerHTML='Sending<span class="spin"></span>';
-fetch('/notify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-.then(r=>r.json()).then(d=>{N.className='msg '+(d.ok?'ok':'err');N.textContent=d.msg;})
-.catch(()=>{N.className='msg err';N.textContent='Request failed';});}
+fetch('/notify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+body:'text='+encodeURIComponent(t)+'&color='+encodeURIComponent(c)+'&size='+s+'&effect='+encodeURIComponent(e)+'&duration='+d})
+.then(r=>r.json()).then(d=>{N.className='msg '+(d.ok?'ok':'err');N.textContent=d.msg||'';
+}).catch(()=>{N.className='msg err';N.textContent='Request failed';});}
 
-fetch('/status').then(r=>r.json()).then(d=>{if(d.connected)W.innerHTML='<span class="ok">Connected to '+d.ssid+' &mdash; IP: '+d.ip+'</span>';
+fetch('/status').then(r=>r.json()).then(d=>{
+if(d.connected)W.innerHTML='<span class="ok">Connected to '+d.ssid+' &mdash; IP: '+d.ip+'</span>';
 else W.textContent=d.ap?'AP mode \u2014 not connected to WiFi':'Not connected';
 if(d.mqtt){var m=d.mqtt;document.getElementById('ms').value=m.server||'';
 document.getElementById('mp').value=m.port||1883;document.getElementById('mu').value=m.user||'';
