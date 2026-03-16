@@ -43,6 +43,11 @@ extern uint8_t MAX_BRIGHTNESS_VAL;  // runtime copy of MAX_BRIGHTNESS
 class MatrixPanel_I2S_DMA;
 extern MatrixPanel_I2S_DMA *dma_display;
 
+// Parse a JSON or plain-text payload and arm textNotif.
+// JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5000}
+// Plain text: entire payload used as message with defaults.
+void applyTextNotification(const char *payload);
+
 void applyBrightness(uint8_t val);
 void applyPanelOn(bool on);
 

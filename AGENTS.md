@@ -168,6 +168,12 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
                       bool rainbow, uint32_t durationMs);
 ```
 
+**`applyTextNotification` function** (shared parser — called by both MQTT callback and HTTP handler):
+```cpp
+void applyTextNotification(const char *payload);
+```
+Accepts a JSON payload (as above) or plain text (uses all defaults). Both MQTT and HTTP routes delegate to this function to avoid duplicating parsing logic.
+
 ---
 
 ## Build & Flash
