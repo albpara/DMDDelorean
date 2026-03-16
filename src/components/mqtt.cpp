@@ -300,6 +300,27 @@ void mqttPublishDiscovery() {
         "}"
         "}";
     mqttClient.publish(clockNumDiscTopic.c_str(), numPayload.c_str(), true);
+
+    String rebootBtnDiscTopic = "homeassistant/button/" + mqttClientId + "_reboot/config";
+    String rebootPayload = "{\"name\":\"DMD Reboot\""
+        ",\"unique_id\":\"" + mqttClientId + "_reboot\""
+        ",\"object_id\":\"" + mqttClientId + "_reboot\""
+        ",\"command_topic\":\"" + mqttTopic + "/reboot/set\""
+        ",\"payload_press\":\"PRESS\""
+        ",\"entity_category\":\"diagnostic\""
+        ",\"device_class\":\"restart\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(rebootBtnDiscTopic.c_str(), rebootPayload.c_str(), true);
 }
 
 /* =================================================================
@@ -316,6 +337,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String notifyTopic = mqttTopic + "/notify";
     String clockTopic  = mqttTopic + "/clock/set";
     String clockEveryTopic = mqttTopic + "/clock/every/set";
+    String rebootTopic = mqttTopic + "/reboot/set";
 
     if (t == cmdTopic) {
         String s(msg);
@@ -342,6 +364,18 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     } else if (t == clockEveryTopic) {
         int v = String(msg).toInt();
         if (v > 0 && v < 65535) updateClockConfig(clockModeEnabled, (uint16_t)v, clockTz, true);
+    } else if (t == rebootTopic) {
+        String s(msg);
+        s.trim();
+        s.toUpperCase();
+        if (s.length() == 0 || s == "PRESS" || s == "REBOOT" || s == "ON" || s == "1") {
+            Serial.println("[MQTT] Reboot command received");
+            String availTopic = mqttTopic + "/available";
+            mqttClient.publish(availTopic.c_str(), "offline", true);
+            mqttClient.loop();
+            delay(100);
+            ESP.restart();
+        }
     }
 }
 
@@ -383,14 +417,17 @@ void mqttConnect() {
         String notifyTopic = mqttTopic + "/notify";
         String clockTopic  = mqttTopic + "/clock/set";
         String clockEveryTopic = mqttTopic + "/clock/every/set";
+        String rebootTopic = mqttTopic + "/reboot/set";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
         mqttClient.subscribe(notifyTopic.c_str());
         mqttClient.subscribe(clockTopic.c_str());
         mqttClient.subscribe(clockEveryTopic.c_str());
+        mqttClient.subscribe(rebootTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", clockTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", clockEveryTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", rebootTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
         mqttPublishClockState();
