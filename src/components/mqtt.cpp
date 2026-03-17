@@ -22,6 +22,11 @@ char     clockTz[64]      = "";
 volatile bool clockConfigDirty = false;
 volatile bool clockTimeValid   = false;
 
+// Dashboard mode state
+bool     dashboardModeEnabled = false;
+uint16_t dashboardDwellSeconds = DASHBOARD_DEFAULT_DWELL_SECONDS;
+char     dashboardProfile[16] = "";
+
 // Text notification state — filled by MQTT or web UI, consumed by loop()
 TextNotification textNotif = {"", 0, 0, false, 0, false};
 static portMUX_TYPE textNotifMux = portMUX_INITIALIZER_UNLOCKED;
@@ -29,6 +34,10 @@ static TextNotification textNotifQueue[NOTIFY_QUEUE_LEN];
 static uint8_t textNotifHead = 0;
 static uint8_t textNotifTail = 0;
 static uint8_t textNotifCount = 0;
+static TextNotification dashboardCards[DASHBOARD_MAX_ITEMS];
+static uint8_t dashboardCardCount = 0;
+static uint8_t dashboardCardCursor = 0;
+static portMUX_TYPE dashboardMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void resetTextNotification(TextNotification &notif) {
     notif.text[0] = '\0';
@@ -46,6 +55,77 @@ static void resetTextNotificationQueue() {
     for (uint8_t i = 0; i < NOTIFY_QUEUE_LEN; i++) {
         resetTextNotification(textNotifQueue[i]);
     }
+}
+
+static void resetDashboardCards() {
+    dashboardCardCount = 0;
+    dashboardCardCursor = 0;
+    for (uint8_t i = 0; i < DASHBOARD_MAX_ITEMS; i++) {
+        resetTextNotification(dashboardCards[i]);
+    }
+}
+
+static bool jsonExtractQuoted(const String &obj, const char *key, String *out) {
+    if (!out || !key) return false;
+    String needle = String("\"") + key + "\"";
+    int ki = obj.indexOf(needle);
+    if (ki < 0) return false;
+    int colon = obj.indexOf(':', ki + needle.length());
+    if (colon < 0) return false;
+    int q1 = obj.indexOf('"', colon + 1);
+    if (q1 < 0) return false;
+    int q2 = obj.indexOf('"', q1 + 1);
+    if (q2 <= q1) return false;
+    *out = obj.substring(q1 + 1, q2);
+    return true;
+}
+
+static bool jsonExtractInt(const String &obj, const char *key, int *out) {
+    if (!out || !key) return false;
+    String needle = String("\"") + key + "\"";
+    int ki = obj.indexOf(needle);
+    if (ki < 0) return false;
+    int colon = obj.indexOf(':', ki + needle.length());
+    if (colon < 0) return false;
+    *out = obj.substring(colon + 1).toInt();
+    return true;
+}
+
+static bool jsonExtractBool(const String &obj, const char *key, bool *out) {
+    if (!out || !key) return false;
+    String needle = String("\"") + key + "\"";
+    int ki = obj.indexOf(needle);
+    if (ki < 0) return false;
+    int colon = obj.indexOf(':', ki + needle.length());
+    if (colon < 0) return false;
+    String tail = obj.substring(colon + 1);
+    tail.trim();
+    if (tail.startsWith("true") || tail.startsWith("1")) {
+        *out = true;
+        return true;
+    }
+    if (tail.startsWith("false") || tail.startsWith("0")) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static void mqttPublishDashboardState() {
+    if (!mqttClient.connected()) return;
+    String topic = mqttTopic + "/dashboard/state";
+    String payload = "{\"enabled\":";
+    payload += dashboardModeEnabled ? "true" : "false";
+    payload += ",\"dwell\":";
+    payload += dashboardDwellSeconds;
+    payload += ",\"profile\":\"";
+    String profile = String(dashboardProfile);
+    profile.replace("\"", "\\\"");
+    payload += profile;
+    payload += "\",\"count\":";
+    payload += dashboardCardCount;
+    payload += "}";
+    mqttClient.publish(topic.c_str(), payload.c_str(), true);
 }
 
 static void initRuntimeDefaults() {
@@ -68,8 +148,14 @@ static void initRuntimeDefaults() {
     clockConfigDirty = true;
     clockTimeValid = false;
 
+    dashboardModeEnabled = DASHBOARD_DEFAULT_ENABLED;
+    dashboardDwellSeconds = DASHBOARD_DEFAULT_DWELL_SECONDS;
+    strncpy(dashboardProfile, DASHBOARD_DEFAULT_PROFILE, sizeof(dashboardProfile) - 1);
+    dashboardProfile[sizeof(dashboardProfile) - 1] = '\0';
+
     resetTextNotification(textNotif);
     resetTextNotificationQueue();
+    resetDashboardCards();
 }
 
 static void mqttPublishClockState() {
@@ -169,6 +255,62 @@ void applyClockConfigPayload(const char *payload) {
 }
 
 /* =================================================================
+ *  DASHBOARD CONFIG HELPERS
+ * ================================================================= */
+static void persistDashboardConfig() {
+    Preferences prefs;
+    prefs.begin("dash", false);
+    prefs.putBool("enabled", dashboardModeEnabled);
+    prefs.putUShort("dwell", dashboardDwellSeconds);
+    prefs.putString("profile", String(dashboardProfile));
+    prefs.end();
+}
+
+void loadDashboardConfig() {
+    Preferences prefs;
+    prefs.begin("dash", true);
+    dashboardModeEnabled = prefs.getBool("enabled", DASHBOARD_DEFAULT_ENABLED);
+    dashboardDwellSeconds = prefs.getUShort("dwell", DASHBOARD_DEFAULT_DWELL_SECONDS);
+    String profile = prefs.getString("profile", DASHBOARD_DEFAULT_PROFILE);
+    prefs.end();
+    profile.toCharArray(dashboardProfile, sizeof(dashboardProfile));
+    if (dashboardDwellSeconds == 0) dashboardDwellSeconds = 1;
+}
+
+void applyDashboardModePayload(const char *payload) {
+    if (!payload) return;
+    String s(payload);
+    s.trim();
+    s.toUpperCase();
+    bool enabled = dashboardModeEnabled;
+    if (s == "ON" || s == "1" || s == "TRUE") enabled = true;
+    else if (s == "OFF" || s == "0" || s == "FALSE") enabled = false;
+    dashboardModeEnabled = enabled;
+    persistDashboardConfig();
+    mqttPublishDashboardState();
+}
+
+void applyDashboardDwellPayload(const char *payload) {
+    if (!payload) return;
+    int v = String(payload).toInt();
+    if (v < 1) v = 1;
+    if (v > 120) v = 120;
+    dashboardDwellSeconds = (uint16_t)v;
+    persistDashboardConfig();
+    mqttPublishDashboardState();
+}
+
+void applyDashboardProfilePayload(const char *payload) {
+    if (!payload) return;
+    String s(payload);
+    s.trim();
+    if (s.length() == 0) return;
+    s.toCharArray(dashboardProfile, sizeof(dashboardProfile));
+    persistDashboardConfig();
+    mqttPublishDashboardState();
+}
+
+/* =================================================================
  *  TEXT NOTIFICATION PARSER
  *  Accepts JSON or plain-text payload, arms textNotif for loop().
  *  JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
@@ -203,6 +345,34 @@ bool takePendingTextNotification(TextNotification *out) {
     taskEXIT_CRITICAL(&textNotifMux);
 
     return havePending;
+}
+
+bool hasDashboardCards() {
+    bool available;
+    taskENTER_CRITICAL(&dashboardMux);
+    available = (dashboardCardCount > 0);
+    taskEXIT_CRITICAL(&dashboardMux);
+    return available;
+}
+
+bool takeNextDashboardCard(TextNotification *out) {
+    if (!out) return false;
+    bool available = false;
+    taskENTER_CRITICAL(&dashboardMux);
+    if (dashboardCardCount > 0) {
+        uint8_t idx = dashboardCardCursor;
+        const TextNotification &card = dashboardCards[idx];
+        memcpy(out->text, card.text, sizeof(card.text));
+        out->color = card.color;
+        out->size = card.size;
+        out->rainbow = card.rainbow;
+        out->duration = card.duration;
+        out->pending = false;
+        dashboardCardCursor = (uint8_t)((dashboardCardCursor + 1) % dashboardCardCount);
+        available = true;
+    }
+    taskEXIT_CRITICAL(&dashboardMux);
+    return available;
 }
 
 void applyTextNotification(const char *payload) {
@@ -292,6 +462,129 @@ void applyTextNotification(const char *payload) {
                           nextNotif.text, (unsigned)NOTIFY_QUEUE_LEN);
         }
     }
+}
+
+void applyDashboardPayload(const char *payload) {
+    if (!payload) return;
+    String s(payload);
+    s.trim();
+    if (s.length() == 0) return;
+
+    String wrapped = s;
+    if (s.startsWith("{")) {
+        wrapped = "[" + s + "]";
+    }
+    if (!wrapped.startsWith("[")) {
+        Serial.println("[DASH] invalid payload: expected JSON array/object");
+        return;
+    }
+
+    TextNotification parsed[DASHBOARD_MAX_ITEMS];
+    for (uint8_t i = 0; i < DASHBOARD_MAX_ITEMS; i++) {
+        resetTextNotification(parsed[i]);
+        parsed[i].duration = dashboardDwellSeconds;
+    }
+
+    uint8_t parsedCount = 0;
+    int depth = 0;
+    int objStart = -1;
+    bool inStr = false;
+    char prev = '\0';
+
+    for (int i = 0; i < wrapped.length() && parsedCount < DASHBOARD_MAX_ITEMS; i++) {
+        char c = wrapped[i];
+        if (c == '"' && prev != '\\') inStr = !inStr;
+        if (!inStr) {
+            if (c == '{') {
+                if (depth == 0) objStart = i;
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0 && objStart >= 0) {
+                    String obj = wrapped.substring(objStart, i + 1);
+                    TextNotification card;
+                    resetTextNotification(card);
+                    card.duration = dashboardDwellSeconds;
+
+                    String type;
+                    if (!jsonExtractQuoted(obj, "type", &type)) type = "text";
+
+                    String text;
+                    String title;
+                    String value;
+                    String unit;
+                    jsonExtractQuoted(obj, "text", &text);
+                    jsonExtractQuoted(obj, "title", &title);
+                    jsonExtractQuoted(obj, "value", &value);
+                    jsonExtractQuoted(obj, "unit", &unit);
+
+                    if (type == "sensor") {
+                        String built;
+                        if (title.length() > 0) {
+                            built += title;
+                            built += ": ";
+                        }
+                        if (value.length() > 0) built += value;
+                        if (unit.length() > 0) built += unit;
+                        text = built;
+                    }
+
+                    if (text.length() == 0) {
+                        objStart = -1;
+                        prev = c;
+                        continue;
+                    }
+
+                    text.toCharArray(card.text, sizeof(card.text));
+
+                    String color;
+                    if (jsonExtractQuoted(obj, "color", &color)) {
+                        if (color.length() == 7 && color[0] == '#') {
+                            long v = strtol(color.substring(1).c_str(), nullptr, 16);
+                            uint8_t r = (uint8_t)((v >> 16) & 0xFF);
+                            uint8_t g = (uint8_t)((v >> 8) & 0xFF);
+                            uint8_t b = (uint8_t)(v & 0xFF);
+                            if (dma_display) card.color = dma_display->color565(r, g, b);
+                        }
+                    }
+
+                    int sz = 0;
+                    if (jsonExtractInt(obj, "size", &sz) && sz >= 1 && sz <= 3) {
+                        card.size = (uint8_t)sz;
+                    }
+
+                    bool rb = false;
+                    if (jsonExtractBool(obj, "rainbow", &rb)) card.rainbow = rb;
+                    String effect;
+                    if (jsonExtractQuoted(obj, "effect", &effect)) {
+                        effect.toLowerCase();
+                        if (effect == "rainbow") card.rainbow = true;
+                    }
+
+                    int dur = 0;
+                    if (jsonExtractInt(obj, "duration", &dur) && dur > 0) {
+                        card.duration = (uint32_t)dur;
+                    }
+
+                    parsed[parsedCount++] = card;
+                    objStart = -1;
+                }
+            }
+        }
+        prev = c;
+    }
+
+    taskENTER_CRITICAL(&dashboardMux);
+    resetDashboardCards();
+    for (uint8_t i = 0; i < parsedCount; i++) {
+        dashboardCards[i] = parsed[i];
+    }
+    dashboardCardCount = parsedCount;
+    dashboardCardCursor = 0;
+    taskEXIT_CRITICAL(&dashboardMux);
+
+    Serial.printf("[DASH] loaded %u card(s)\n", parsedCount);
+    mqttPublishDashboardState();
 }
 
 /* =================================================================
@@ -425,6 +718,73 @@ void mqttPublishDiscovery() {
         "}"
         "}";
     mqttClient.publish(rebootBtnDiscTopic.c_str(), rebootPayload.c_str(), true);
+
+    String dashSwitchDiscTopic = "homeassistant/switch/" + mqttClientId + "_dashboard/config";
+    String dashSwitchPayload = "{\"name\":\"DMD Dashboard Mode\""
+        ",\"unique_id\":\"" + mqttClientId + "_dashboard\""
+        ",\"object_id\":\"" + mqttClientId + "_dashboard\""
+        ",\"command_topic\":\"" + mqttTopic + "/dashboard/mode/set\""
+        ",\"state_topic\":\"" + mqttTopic + "/dashboard/state\""
+        ",\"payload_on\":\"ON\""
+        ",\"payload_off\":\"OFF\""
+        ",\"state_on\":\"ON\""
+        ",\"state_off\":\"OFF\""
+        ",\"value_template\":\"{{ 'ON' if value_json.enabled else 'OFF' }}\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(dashSwitchDiscTopic.c_str(), dashSwitchPayload.c_str(), true);
+
+    String dashDwellDiscTopic = "homeassistant/number/" + mqttClientId + "_dashboard_dwell/config";
+    String dashDwellPayload = "{\"name\":\"DMD Dashboard Dwell\""
+        ",\"unique_id\":\"" + mqttClientId + "_dashboard_dwell\""
+        ",\"object_id\":\"" + mqttClientId + "_dashboard_dwell\""
+        ",\"command_topic\":\"" + mqttTopic + "/dashboard/dwell/set\""
+        ",\"state_topic\":\"" + mqttTopic + "/dashboard/state\""
+        ",\"value_template\":\"{{ value_json.dwell }}\""
+        ",\"min\":1,\"max\":120,\"step\":1,\"mode\":\"box\""
+        ",\"unit_of_measurement\":\"s\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(dashDwellDiscTopic.c_str(), dashDwellPayload.c_str(), true);
+
+    String dashProfileDiscTopic = "homeassistant/select/" + mqttClientId + "_dashboard_profile/config";
+    String dashProfilePayload = "{\"name\":\"DMD Dashboard Profile\""
+        ",\"unique_id\":\"" + mqttClientId + "_dashboard_profile\""
+        ",\"object_id\":\"" + mqttClientId + "_dashboard_profile\""
+        ",\"command_topic\":\"" + mqttTopic + "/dashboard/profile/set\""
+        ",\"state_topic\":\"" + mqttTopic + "/dashboard/state\""
+        ",\"value_template\":\"{{ value_json.profile }}\""
+        ",\"options\":[\"default\",\"focus\",\"night\",\"away\"]"
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(dashProfileDiscTopic.c_str(), dashProfilePayload.c_str(), true);
 }
 
 /* =================================================================
@@ -442,6 +802,10 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String clockTopic  = mqttTopic + "/clock/set";
     String clockEveryTopic = mqttTopic + "/clock/every/set";
     String rebootTopic = mqttTopic + "/reboot/set";
+    String dashSetTopic = mqttTopic + "/dashboard/set";
+    String dashModeTopic = mqttTopic + "/dashboard/mode/set";
+    String dashDwellTopic = mqttTopic + "/dashboard/dwell/set";
+    String dashProfileTopic = mqttTopic + "/dashboard/profile/set";
 
     if (t == cmdTopic) {
         String s(msg);
@@ -468,6 +832,14 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     } else if (t == clockEveryTopic) {
         int v = String(msg).toInt();
         if (v > 0 && v < 65535) updateClockConfig(clockModeEnabled, (uint16_t)v, clockTz, true);
+    } else if (t == dashSetTopic) {
+        applyDashboardPayload(msg);
+    } else if (t == dashModeTopic) {
+        applyDashboardModePayload(msg);
+    } else if (t == dashDwellTopic) {
+        applyDashboardDwellPayload(msg);
+    } else if (t == dashProfileTopic) {
+        applyDashboardProfilePayload(msg);
     } else if (t == rebootTopic) {
         String s(msg);
         s.trim();
@@ -522,19 +894,32 @@ void mqttConnect() {
         String clockTopic  = mqttTopic + "/clock/set";
         String clockEveryTopic = mqttTopic + "/clock/every/set";
         String rebootTopic = mqttTopic + "/reboot/set";
+        String dashSetTopic = mqttTopic + "/dashboard/set";
+        String dashModeTopic = mqttTopic + "/dashboard/mode/set";
+        String dashDwellTopic = mqttTopic + "/dashboard/dwell/set";
+        String dashProfileTopic = mqttTopic + "/dashboard/profile/set";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
         mqttClient.subscribe(notifyTopic.c_str());
         mqttClient.subscribe(clockTopic.c_str());
         mqttClient.subscribe(clockEveryTopic.c_str());
         mqttClient.subscribe(rebootTopic.c_str());
+        mqttClient.subscribe(dashSetTopic.c_str());
+        mqttClient.subscribe(dashModeTopic.c_str());
+        mqttClient.subscribe(dashDwellTopic.c_str());
+        mqttClient.subscribe(dashProfileTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", clockTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", clockEveryTopic.c_str());
         Serial.printf("[MQTT] Subscribed to %s\n", rebootTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", dashSetTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", dashModeTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", dashDwellTopic.c_str());
+        Serial.printf("[MQTT] Subscribed to %s\n", dashProfileTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
         mqttPublishClockState();
+        mqttPublishDashboardState();
     } else {
         Serial.printf("[MQTT] Failed, rc=%d\n", mqttClient.state());
     }
@@ -566,6 +951,7 @@ void mqttSetup() {
     initRuntimeDefaults();
     loadMqttConfig();
     loadClockConfig();
+    loadDashboardConfig();
 }
 
 void mqttLoop() {

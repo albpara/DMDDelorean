@@ -625,6 +625,17 @@ void playbackTaskFn(void *) {
             continue;
         }
 
+        // Dashboard mode loops through cards published by Home Assistant.
+        if (dashboardModeEnabled && hasDashboardCards()) {
+            TextNotification dashboardCard;
+            if (takeNextDashboardCard(&dashboardCard)) {
+                showNotification(dashboardCard.text, dashboardCard.color, dashboardCard.size,
+                                 dashboardCard.rainbow, dashboardCard.duration);
+                if (dma_display) dma_display->clearScreen();
+                continue;
+            }
+        }
+
         if (gifCount == 0) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;

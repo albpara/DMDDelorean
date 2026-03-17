@@ -25,6 +25,11 @@ extern char     clockTz[64];
 extern volatile bool clockConfigDirty;
 extern volatile bool clockTimeValid;
 
+/* Dashboard mode state/config */
+extern bool     dashboardModeEnabled;
+extern uint16_t dashboardDwellSeconds;
+extern char     dashboardProfile[16];
+
 /* WiFi stability tracking (set by wifi_portal, read by mqtt) */
 extern unsigned long wifiConnectedAt;
 
@@ -49,10 +54,17 @@ extern MatrixPanel_I2S_DMA *dma_display;
 // Plain text: entire payload used as message with defaults.
 bool hasPendingTextNotification();
 bool takePendingTextNotification(TextNotification *out);
+bool hasDashboardCards();
+bool takeNextDashboardCard(TextNotification *out);
 void applyTextNotification(const char *payload);
+void applyDashboardPayload(const char *payload);
+void applyDashboardModePayload(const char *payload);
+void applyDashboardDwellPayload(const char *payload);
+void applyDashboardProfilePayload(const char *payload);
 void applyClockConfigPayload(const char *payload);
 void updateClockConfig(bool enabled, uint16_t every, const char *tz, bool persist);
 void loadClockConfig();
+void loadDashboardConfig();
 
 void applyBrightness(uint8_t val);
 void applyPanelOn(bool on);
