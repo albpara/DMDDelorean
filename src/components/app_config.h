@@ -73,6 +73,12 @@
 #define CLOCK_DEFAULT_EVERY       5
 #define CLOCK_DEFAULT_TZ          "UTC0"
 
+/* Dashboard mode defaults */
+#define DASHBOARD_DEFAULT_ENABLED      false
+#define DASHBOARD_DEFAULT_DWELL_SECONDS 5
+#define DASHBOARD_DEFAULT_PROFILE      "default"
+#define DASHBOARD_MAX_ITEMS            8
+
 /* Text notification defaults */
 #define NOTIFY_DEFAULT_COLOR_RGB565 0xFFFF
 #define NOTIFY_DEFAULT_SIZE         1

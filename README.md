@@ -12,6 +12,7 @@ A PlatformIO/Arduino project for **ESP32** that plays animated GIFs on a **128×
 - **Anti-ghosting optimizations** — tuned `latch_blanking`, `clkphase`, refresh-rate, and I2S clock speed settings to minimize ghosting artifacts.
 - **Automatic centering** — GIFs smaller than 128×32 are centered on the display.
 - **Graceful fallback** — works without PSRAM using direct SD file reads (with minor pauses between GIFs).
+- **Home Assistant dashboard mode (Phase 1)** — MQTT-driven rotating cards (`text` and `sensor`) with profile and dwell controls.
 
 ---
 
@@ -188,6 +189,106 @@ All tunable parameters are `#define` constants at the top of `src/main.cpp`:
 3. The main loop plays GIF frames from Buffer A — **no SD card access occurs during playback**.
 4. When the GIF ends, the buffers swap instantly. Buffer A is now free, and the preload task begins loading the next GIF into it.
 5. This ping-pong continues indefinitely through the playlist.
+
+---
+
+## Home Assistant Dashboard (Phase 1)
+
+Dashboard mode adds a simple card rotator on top of GIF playback.
+
+- Notifications still have highest priority.
+- Dashboard cards run when dashboard mode is enabled and cards are loaded.
+- If dashboard mode is disabled (or card list is empty), normal GIF playback continues.
+
+### MQTT Topics
+
+| Topic | Purpose |
+|------|---------|
+| `{topic}/dashboard/set` | Load dashboard card list (JSON array) |
+| `{topic}/dashboard/mode/set` | Enable/disable dashboard mode (`ON`/`OFF`) |
+| `{topic}/dashboard/dwell/set` | Default card dwell time in seconds (1..120) |
+| `{topic}/dashboard/profile/set` | Profile label (`default`, `night`, etc.) |
+| `{topic}/dashboard/state` | Current dashboard state JSON (`enabled`, `dwell`, `profile`, `count`) |
+
+### Supported Card Types
+
+- `text`: plain text message card
+- `sensor`: title + value + unit compact card
+
+### Example Payload (Set Dashboard Cards)
+
+Publish this JSON payload to `{topic}/dashboard/set`:
+
+```json
+[
+        {
+                "type": "text",
+                "text": "Welcome Home",
+                "color": "#00C8FF",
+                "size": 1,
+                "duration": 4
+        },
+        {
+                "type": "sensor",
+                "title": "Temp",
+                "value": "22.6",
+                "unit": "C",
+                "color": "#00FF66",
+                "size": 1,
+                "duration": 5
+        },
+        {
+                "type": "sensor",
+                "title": "Humidity",
+                "value": "48",
+                "unit": "%",
+                "color": "#FFD166",
+                "size": 1,
+                "duration": 5
+        }
+]
+```
+
+Then enable dashboard mode by publishing `ON` to `{topic}/dashboard/mode/set`.
+
+### Example (Home Assistant Entity Values via Template)
+
+In Home Assistant, publish entity values by templating the payload in an automation/script:
+
+```yaml
+action:
+        - service: mqtt.publish
+                data:
+                        topic: delorean-dmd/dashboard/set
+                        retain: true
+                        payload: >-
+                                [
+                                        {
+                                                "type":"sensor",
+                                                "title":"Temp",
+                                                "value":"{{ states('sensor.living_room_temperature') }}",
+                                                "unit":"C",
+                                                "color":"#00FF66",
+                                                "duration":5
+                                        },
+                                        {
+                                                "type":"sensor",
+                                                "title":"Humidity",
+                                                "value":"{{ states('sensor.living_room_humidity') }}",
+                                                "unit":"%",
+                                                "color":"#FFD166",
+                                                "duration":5
+                                        },
+                                        {
+                                                "type":"text",
+                                                "text":"Solar {{ states('sensor.solar_power') }} W",
+                                                "color":"#00C8FF",
+                                                "duration":4
+                                        }
+                                ]
+```
+
+Tip: use `states('entity_id')` in templates so unavailable entities return `unknown` instead of failing template rendering.
 
 ---
 

@@ -234,11 +234,32 @@ The firmware currently publishes Home Assistant discovery for:
 - clock mode switch (`{topic}/clock/set`, `{topic}/clock/state`)
 - clock cadence number (`{topic}/clock/every/set`, `{topic}/clock/state`)
 - reboot button (`{topic}/reboot/set`)
+- dashboard mode switch (`{topic}/dashboard/mode/set`, `{topic}/dashboard/state`)
+- dashboard dwell number (`{topic}/dashboard/dwell/set`, `{topic}/dashboard/state`)
+- dashboard profile select (`{topic}/dashboard/profile/set`, `{topic}/dashboard/state`)
 
 Other important MQTT topics:
 - brightness set topic: `{topic}/brightness/set`
 - notification topic: `{topic}/notify`
+- dashboard card list topic: `{topic}/dashboard/set`
 - availability topic: `{topic}/available`
+
+### Dashboard mode details (Phase 1)
+
+- Dashboard mode is opt-in via MQTT (`{topic}/dashboard/mode/set`), OFF by default.
+- Dashboard payload accepts a JSON array of cards on `{topic}/dashboard/set`.
+- Supported card types in Phase 1: `text` and `sensor`.
+- Cards are rotated round-robin by `playbackTaskFn()` on Core 1 when dashboard mode is enabled and at least one card exists.
+- Notification queue still has highest priority; queued notifications preempt dashboard cards.
+- Dashboard settings persist in NVS namespace `dash`:
+    - `enabled` (bool)
+    - `dwell` (seconds, clamped 1..120)
+    - `profile` (string)
+- Dashboard state is published as JSON to `{topic}/dashboard/state`:
+    - `enabled`
+    - `dwell`
+    - `profile`
+    - `count` (loaded cards)
 
 ### Clock mode details
 
@@ -305,3 +326,4 @@ pio device monitor
 5. **Notification queue semantics:** replaced shared live notification mutation with a bounded FIFO queue (`NOTIFY_QUEUE_LEN`, currently 4). New notifications wait their turn; overflow is dropped with a serial log.
 6. **Playback debug trace:** added serial logging for the GIF being played (`[PLAY] GIF idx=... path=...`).
 7. **Clock visual tuning:** clock mode now renders time/date in dark green tones instead of white/gray.
+8. **Phase 1 HA dashboard mode:** added MQTT-driven rotating dashboard cards (`text`/`sensor`), persisted dashboard settings (`enabled`, `dwell`, `profile`), and Home Assistant discovery entities for dashboard mode, dwell, and profile.
