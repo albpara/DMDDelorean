@@ -20,55 +20,9 @@
 #include <time.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <AnimatedGIF.h>
+#include "components/app_config.h"
 #include "components/mqtt.h"
 #include "components/wifi_portal.h"
-
-/* =================================================================
- *  PIN DEFINITIONS — HUB75 Panel
- * ================================================================= */
-#define R1_PIN   25
-#define G1_PIN   26
-#define B1_PIN   27
-#define R2_PIN   14
-#define G2_PIN   12
-#define B2_PIN   13
-#define A_PIN    33
-#define B_PIN    32
-#define C_PIN    22
-#define D_PIN    17
-#define E_PIN    -1   // Tied to GND – 1/16 scan (32-row panel)
-#define CLK_PIN  16
-#define LAT_PIN   4
-#define OE_PIN   15
-
-/* PIN DEFINITIONS — SD Card (VSPI) */
-#define SD_CS     5
-#define SD_SCK   18
-#define SD_MOSI  23
-#define SD_MISO  19
-
-/* =================================================================
- *  PANEL CONFIGURATION
- * ================================================================= */
-#define PANEL_RES_X       64      // Width of one physical module
-#define PANEL_RES_Y       32      // Height
-#define PANEL_CHAIN        2      // Two 64x32 modules chained → 128x32
-#define TOTAL_WIDTH       (PANEL_RES_X * PANEL_CHAIN)
-
-/* =================================================================
- *  PLAYBACK CONFIGURATION
- * ================================================================= */
-#define MAX_GIF_SIZE      (300 * 1024)  // 300 KB ceiling per GIF file
-#define LISTA_PATH        "/lista.txt"
-#define DEFAULT_BRIGHTNESS 25           // 0-255 (~10%)
-#define MAX_BRIGHTNESS     80           // Hard cap — no dedicated PSU, protect ESP32
-
-/* Anti-ghosting / display tuning (from RetroPixelLED reference) */
-#define LATCH_BLANKING     1            // 1-4 — higher = less ghosting
-#define MIN_REFRESH_HZ     90
-#define I2S_CLK_SPEED      HUB75_I2S_CFG::HZ_10M
-#define CLK_PHASE          false
-#define RANDOM_PLAYBACK    true         // true = shuffle, false = sequential
 
 /* =================================================================
  *  GLOBAL STATE
@@ -123,12 +77,6 @@ int nextIdx() {
  *  Optional font size (1–3) and rainbow colour effect.
  *  Blocking call — returns only when the full scroll has finished.
  * ================================================================= */
-#define CHAR_W  6   // Adafruit GFX default 5x7 font + 1px gap = 6px per char at size 1
-#define CHAR_H  8   // font height at size 1
-#define SCROLL_STEP_MS  30   // ms per pixel scroll step
-#define CLOCK_MIN_DISPLAY_SECONDS 10
-#define NTP_RETRY_MS 30000
-
 /* Convert hue (0–359°) to RGB565 — full saturation and value (HSV with S=V=1) */
 static uint16_t hue565(int hue) {
     hue = ((hue % 360) + 360) % 360;

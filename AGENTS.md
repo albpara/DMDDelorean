@@ -32,6 +32,7 @@ sequentially on the panel with a **PSRAM ping-pong double-buffer** strategy for 
 |------|---------|
 | `platformio.ini` | Board, framework, libraries, PSRAM build flags |
 | `src/main.cpp` | All firmware code (pin defs, setup, playback loop, preload task, GIF callbacks) |
+| `src/components/app_config.h` | Centralized project constants (pins, playback, MQTT, WiFi, timing defaults) |
 | `AGENTS.md` | This file — context for AI coding agents |
 | `README.md` | Human-facing documentation |
 
@@ -71,7 +72,7 @@ sequentially on the panel with a **PSRAM ping-pong double-buffer** strategy for 
 
 ## Anti-Ghosting Settings
 
-These values (in `#define` constants at the top of `main.cpp`) reduce ghosting on HUB75 panels:
+These values (in `#define` constants in `src/components/app_config.h`) reduce ghosting on HUB75 panels:
 
 | Parameter | Default | Range | Effect |
 |-----------|---------|-------|--------|
@@ -123,11 +124,19 @@ The SD card root must contain a file `/lista.txt` with one GIF path per line:
 ### Adding WiFi / Web UI
 Add `WiFi.h`, `WebServer.h`, and `WiFiManager.h`. Run the web server on Core 0 in `loop()` and move GIF playback to a dedicated task on Core 1. Protect SD access with the existing `sdMutex`.
 
+### Current WiFi boot behavior (saved credentials)
+- On boot, if credentials are stored in NVS, STA connect runs in background.
+- Firmware retries saved credentials up to `WIFI_BOOT_CONNECT_MAX_RETRIES`.
+- Delay between retries: `WIFI_BOOT_RETRY_INTERVAL`.
+- Per-attempt timeout: `WIFI_CONNECT_TIMEOUT`.
+- If all retries fail, captive portal AP remains active.
+- These are internal compile-time constants in `src/components/app_config.h` (not exposed via UI/MQTT).
+
 ### Changing panel resolution
 Edit `PANEL_RES_X`, `PANEL_RES_Y`, and `PANEL_CHAIN` at the top of `main.cpp`. `TOTAL_WIDTH` is computed automatically.
 
 ### Adjusting anti-ghosting
-Modify `LATCH_BLANKING` (1–4), `MIN_REFRESH_HZ`, `I2S_CLK_SPEED`, and `CLK_PHASE` defines. Higher latch blanking reduces ghosting but dims the display.
+Modify `LATCH_BLANKING` (1–4), `MIN_REFRESH_HZ`, `I2S_CLK_SPEED`, and `CLK_PHASE` defines in `src/components/app_config.h`. Higher latch blanking reduces ghosting but dims the display.
 
 ### Adding GIF looping / repeat count
 Wrap the `playFromBuffer`/`playFromFile` calls in an outer `for` loop. The GIF decoder replays from the beginning after re-opening.
@@ -198,3 +207,12 @@ pio device monitor
 3. **SD SPI pins overlap with default VSPI.** If you add other SPI devices, mind bus contention.
 4. **`MAX_GIF_SIZE` caps memory use.** GIFs larger than this value are skipped with a serial error.
 5. **GPIO 12 (`G2_PIN`) is a bootstrap pin.** Ensure it's not pulled high at boot or the ESP32 may fail to start. The HUB75 panel typically pulls it low, so this is usually fine.
+
+---
+
+## Recent Firmware Updates (2026-03-17)
+
+1. **Centralized configuration:** moved firmware constants from multiple files into `src/components/app_config.h`.
+2. **WiFi robustness at boot:** added background retry logic for saved credentials (internal compile-time settings only).
+3. **MQTT/runtime defaults cleanup:** introduced a startup defaults initializer in `src/components/mqtt.cpp` before loading NVS overrides.
+4. **Pin planning aid:** documented currently free GPIOs for future button inputs in `src/components/app_config.h` comments.

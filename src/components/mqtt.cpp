@@ -7,23 +7,51 @@
 WiFiClient   mqttWifi;
 PubSubClient mqttClient(mqttWifi);
 String mqttServer, mqttUser, mqttPass, mqttClientId, mqttTopic;
-uint16_t mqttPort      = MQTT_DEFAULT_PORT;
+uint16_t mqttPort      = 0;
 bool     mqttEnabled   = false;
 unsigned long mqttLastRetry = 0;
 
 // Panel state
-bool    panelOn    = true;
-uint8_t brightness = 25;   // overwritten from main's DEFAULT_BRIGHTNESS
+bool    panelOn    = false;
+uint8_t brightness = 0;
 
 // Clock mode state
 bool     clockModeEnabled = false;
-uint16_t clockEveryNGifs  = 5;
-char     clockTz[64]      = "UTC0";
-volatile bool clockConfigDirty = true;
+uint16_t clockEveryNGifs  = 0;
+char     clockTz[64]      = "";
+volatile bool clockConfigDirty = false;
 volatile bool clockTimeValid   = false;
 
 // Text notification state — filled by MQTT or web UI, consumed by loop()
-TextNotification textNotif = {"", 0xFFFF, 1, false, 5, false};
+TextNotification textNotif = {"", 0, 0, false, 0, false};
+
+static void initRuntimeDefaults() {
+    mqttServer = "";
+    mqttUser = "";
+    mqttPass = "";
+    mqttClientId = MQTT_DEFAULT_CLIENT;
+    mqttTopic = MQTT_DEFAULT_TOPIC;
+    mqttPort = MQTT_DEFAULT_PORT;
+    mqttEnabled = false;
+    mqttLastRetry = 0;
+
+    panelOn = true;
+    brightness = DEFAULT_BRIGHTNESS;
+
+    clockModeEnabled = false;
+    clockEveryNGifs = CLOCK_DEFAULT_EVERY;
+    strncpy(clockTz, CLOCK_DEFAULT_TZ, sizeof(clockTz) - 1);
+    clockTz[sizeof(clockTz) - 1] = '\0';
+    clockConfigDirty = true;
+    clockTimeValid = false;
+
+    textNotif.text[0] = '\0';
+    textNotif.color = NOTIFY_DEFAULT_COLOR_RGB565;
+    textNotif.size = NOTIFY_DEFAULT_SIZE;
+    textNotif.rainbow = NOTIFY_DEFAULT_RAINBOW;
+    textNotif.duration = NOTIFY_DEFAULT_DURATION;
+    textNotif.pending = false;
+}
 
 static void mqttPublishClockState() {
     if (!mqttClient.connected()) return;
@@ -70,8 +98,8 @@ void loadClockConfig() {
     Preferences prefs;
     prefs.begin("clock", true);
     bool en = prefs.getBool("enabled", false);
-    uint16_t every = prefs.getUShort("every", 5);
-    String tz = prefs.getString("tz", "UTC0");
+    uint16_t every = prefs.getUShort("every", CLOCK_DEFAULT_EVERY);
+    String tz = prefs.getString("tz", CLOCK_DEFAULT_TZ);
     prefs.end();
     updateClockConfig(en, every, tz.c_str(), false);
 }
@@ -133,10 +161,10 @@ void applyTextNotification(const char *payload) {
     if (s.length() == 0) return;
 
     // Reset to defaults
-    textNotif.color      = 0xFFFF;
-    textNotif.size       = 1;
-    textNotif.rainbow    = false;
-    textNotif.duration   = 5;
+    textNotif.color      = NOTIFY_DEFAULT_COLOR_RGB565;
+    textNotif.size       = NOTIFY_DEFAULT_SIZE;
+    textNotif.rainbow    = NOTIFY_DEFAULT_RAINBOW;
+    textNotif.duration   = NOTIFY_DEFAULT_DURATION;
     textNotif.text[0]    = '\0';
 
     if (s.startsWith("{")) {
@@ -459,6 +487,7 @@ void loadMqttConfig() {
  *  SETUP & LOOP helpers
  * ================================================================= */
 void mqttSetup() {
+    initRuntimeDefaults();
     loadMqttConfig();
     loadClockConfig();
 }

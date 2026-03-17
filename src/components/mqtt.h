@@ -4,12 +4,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
-
-/* MQTT defaults */
-#define MQTT_DEFAULT_PORT    1883
-#define MQTT_DEFAULT_CLIENT  "delorean-dmd"
-#define MQTT_DEFAULT_TOPIC   "delorean-dmd"
-#define MQTT_RETRY_INTERVAL  15000  // ms between reconnect attempts
+#include "app_config.h"
 
 /* Shared MQTT state */
 extern WiFiClient   mqttWifi;
@@ -32,7 +27,6 @@ extern volatile bool clockTimeValid;
 
 /* WiFi stability tracking (set by wifi_portal, read by mqtt) */
 extern unsigned long wifiConnectedAt;
-#define WIFI_STABLE_DELAY  3000
 
 /* Text notification (set by MQTT or web UI, consumed by main loop) */
 struct TextNotification {

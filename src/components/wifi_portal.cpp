@@ -15,6 +15,11 @@ unsigned long wifiConnectedAt = 0;
 static bool wifiStaConnecting = false;
 static unsigned long wifiStaStartedAt = 0;
 static bool wifiIpShown = false;
+static bool wifiSavedRetryEnabled = false;
+static uint8_t wifiSavedRetryAttempt = 0;
+static unsigned long wifiNextRetryAt = 0;
+static String wifiSavedSSID;
+static String wifiSavedPass;
 
 static void startAccessPointPortal() {
     Serial.println("[WIFI] Starting AP: " AP_SSID);
@@ -30,12 +35,29 @@ static void startAccessPointPortal() {
     Serial.println("[WIFI] Captive portal ready");
 }
 
+static void startSavedCredentialAttempt() {
+    if (!wifiSavedRetryEnabled || wifiSavedSSID.length() == 0) return;
+
+    wifiSavedRetryAttempt++;
+    WiFi.mode(apMode ? WIFI_AP_STA : WIFI_STA);
+    WiFi.begin(wifiSavedSSID.c_str(), wifiSavedPass.c_str());
+    wifiStaConnecting = true;
+    wifiStaStartedAt = millis();
+    wifiNextRetryAt = 0;
+
+    Serial.printf("[WIFI] Saved-credential attempt %u/%u: '%s'\n",
+                  wifiSavedRetryAttempt,
+                  (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES,
+                  wifiSavedSSID.c_str());
+}
+
 /* =================================================================
  *  WEB SERVER SERVICING — call from playback frame loops
  * ================================================================= */
 void serviceWeb() {
     if (wifiStaConnecting && WiFi.status() == WL_CONNECTED) {
         wifiStaConnecting = false;
+        wifiSavedRetryEnabled = false;
         apMode = false;
         wifiConnectedAt = millis();
         String ip = WiFi.localIP().toString();
@@ -44,10 +66,27 @@ void serviceWeb() {
             showMessage(ip.c_str(), dma_display->color565(0, 200, 200));
             wifiIpShown = true;
         }
+        dnsServer.stop();
+        WiFi.mode(WIFI_STA);
     } else if (wifiStaConnecting && (millis() - wifiStaStartedAt) >= WIFI_CONNECT_TIMEOUT) {
-        Serial.println("[WIFI] Saved credentials failed");
+        Serial.printf("[WIFI] Saved credentials failed (attempt %u/%u)\n",
+                      wifiSavedRetryAttempt,
+                      (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES);
+        wifiStaConnecting = false;
         WiFi.disconnect();
-        startAccessPointPortal();
+
+        if (wifiSavedRetryEnabled && wifiSavedRetryAttempt < WIFI_BOOT_CONNECT_MAX_RETRIES) {
+            if (!apMode) startAccessPointPortal();
+            wifiNextRetryAt = millis() + WIFI_BOOT_RETRY_INTERVAL;
+            Serial.printf("[WIFI] Retrying in background in %u ms\n", (unsigned)WIFI_BOOT_RETRY_INTERVAL);
+        } else {
+            wifiSavedRetryEnabled = false;
+            if (!apMode) startAccessPointPortal();
+            Serial.println("[WIFI] Max retry attempts reached, staying in AP mode");
+        }
+    } else if (!wifiStaConnecting && wifiSavedRetryEnabled && wifiNextRetryAt != 0 &&
+               (long)(millis() - wifiNextRetryAt) >= 0) {
+        startSavedCredentialAttempt();
     }
 
     webServer.handleClient();
@@ -97,6 +136,10 @@ static void handleConnect() {
     }
 
     Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
+
+    wifiSavedRetryEnabled = false;
+    wifiStaConnecting = false;
+    wifiNextRetryAt = 0;
 
     WiFi.mode(WIFI_AP_STA);
     WiFi.begin(ssid.c_str(), pass.c_str());
@@ -336,14 +379,17 @@ void wifiSetup() {
     prefs.end();
 
     if (savedSSID.length() > 0) {
-        Serial.printf("[WIFI] Trying saved network '%s'...\n", savedSSID.c_str());
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
-        wifiStaConnecting = true;
-        wifiStaStartedAt = millis();
+        wifiSavedSSID = savedSSID;
+        wifiSavedPass = savedPass;
+        wifiSavedRetryEnabled = true;
+        wifiSavedRetryAttempt = 0;
+        wifiNextRetryAt = 0;
         apMode = false;
         wifiIpShown = false;
-        Serial.println("[WIFI] Connecting in background...");
+        Serial.printf("[WIFI] Saved credentials found for '%s'\n", savedSSID.c_str());
+        Serial.printf("[WIFI] Background retry enabled (max %u attempts)\n",
+                      (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES);
+        startSavedCredentialAttempt();
         webServer.begin();
         return;
     }
