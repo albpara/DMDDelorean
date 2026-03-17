@@ -78,6 +78,7 @@
 #define NOTIFY_DEFAULT_SIZE         1
 #define NOTIFY_DEFAULT_RAINBOW      false
 #define NOTIFY_DEFAULT_DURATION     5
+#define NOTIFY_QUEUE_LEN            4
 
 /* =================================================================
  *  MQTT CONFIGURATION

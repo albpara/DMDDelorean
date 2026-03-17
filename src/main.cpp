@@ -258,7 +258,7 @@ static bool showClockMode(uint32_t minSecondsToShow, int waitBuf = -1) {
 
     unsigned long minEndAt = millis() + (minSecondsToShow * 1000UL);
     for (;;) {
-        if (textNotif.pending) return false;
+        if (hasPendingTextNotification()) return false;
         if (WiFi.status() != WL_CONNECTED) return false;
 
         time_t now = time(nullptr);
@@ -285,12 +285,12 @@ static bool showClockMode(uint32_t minSecondsToShow, int waitBuf = -1) {
         dma_display->fillScreen(0);
         dma_display->setTextWrap(false);
         dma_display->setTextSize(2);
-        dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        dma_display->setTextColor(dma_display->color565(0, 120, 0));
         dma_display->setCursor(x1, y1);
         dma_display->print(hhmmss);
 
         dma_display->setTextSize(1);
-        dma_display->setTextColor(dma_display->color565(180, 180, 180));
+        dma_display->setTextColor(dma_display->color565(0, 80, 0));
         dma_display->setCursor(x2, y2);
         dma_display->print(dateBuf);
 
@@ -400,6 +400,22 @@ bool getGifPath(int idx, char *buf, size_t bufLen) {
         buf[bufLen - 1] = '\0';
     }
     return true;
+}
+
+static void logGifPlaybackStart(int idx) {
+    char path[256];
+    bool havePath = false;
+
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(250))) {
+        havePath = getGifPath(idx, path, sizeof(path));
+        xSemaphoreGive(sdMutex);
+    }
+
+    if (havePath) {
+        Serial.printf("[PLAY] GIF idx=%d path=%s\n", idx, path);
+    } else {
+        Serial.printf("[PLAY] GIF idx=%d\n", idx);
+    }
 }
 
 /* =================================================================
@@ -537,7 +553,7 @@ void playFromBuffer(int bi) {
         clearBeforeNextGifDraw = true;
 
         int d;
-        while (gif.playFrame(false, &d) && !textNotif.pending) {
+        while (gif.playFrame(false, &d) && !hasPendingTextNotification()) {
             unsigned long t = millis();
             while ((millis() - t) < (unsigned long)d) { yield(); }
         }
@@ -565,7 +581,7 @@ void playFromFile(int fi) {
             clearBeforeNextGifDraw = true;
 
             int d;
-            while (gif.playFrame(false, &d) && !textNotif.pending) {
+            while (gif.playFrame(false, &d) && !hasPendingTextNotification()) {
                 unsigned long t = millis();
                 while ((millis() - t) < (unsigned long)d) { yield(); }
             }
@@ -601,10 +617,10 @@ void playbackTaskFn(void *) {
         ensureNtpSync();
 
         // Text notification takes priority over GIF playback
-        if (textNotif.pending) {
-            textNotif.pending = false;
-            showNotification(textNotif.text, textNotif.color, textNotif.size,
-                             textNotif.rainbow, textNotif.duration);
+        TextNotification pendingNotif;
+        if (takePendingTextNotification(&pendingNotif)) {
+            showNotification(pendingNotif.text, pendingNotif.color, pendingNotif.size,
+                             pendingNotif.rainbow, pendingNotif.duration);
             if (dma_display) dma_display->clearScreen();
             continue;
         }
@@ -616,6 +632,7 @@ void playbackTaskFn(void *) {
 
         // Double-buffer mode (PSRAM)
         if (hasDualBuf && gifBufOk[playBuf]) {
+            logGifPlaybackStart(currentIdx);
             playFromBuffer(playBuf);
             bool showClock = shouldShowClockAfterGif();
 
@@ -658,6 +675,7 @@ void playbackTaskFn(void *) {
         }
 
         // File-based fallback (no PSRAM)
+        logGifPlaybackStart(currentIdx);
         playFromFile(currentIdx);
         if (shouldShowClockAfterGif() && showClockMode(CLOCK_MIN_DISPLAY_SECONDS)) {
             gifsSinceClock = 0;

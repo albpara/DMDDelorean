@@ -340,7 +340,7 @@ static void handleNotify() {
     payload += "}";
 
     applyTextNotification(payload.c_str());
-    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Notification queued\"}");
+    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Notification accepted\"}");
 }
 
 static void handleNotFound() {

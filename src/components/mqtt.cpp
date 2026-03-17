@@ -24,6 +24,29 @@ volatile bool clockTimeValid   = false;
 
 // Text notification state — filled by MQTT or web UI, consumed by loop()
 TextNotification textNotif = {"", 0, 0, false, 0, false};
+static portMUX_TYPE textNotifMux = portMUX_INITIALIZER_UNLOCKED;
+static TextNotification textNotifQueue[NOTIFY_QUEUE_LEN];
+static uint8_t textNotifHead = 0;
+static uint8_t textNotifTail = 0;
+static uint8_t textNotifCount = 0;
+
+static void resetTextNotification(TextNotification &notif) {
+    notif.text[0] = '\0';
+    notif.color = NOTIFY_DEFAULT_COLOR_RGB565;
+    notif.size = NOTIFY_DEFAULT_SIZE;
+    notif.rainbow = NOTIFY_DEFAULT_RAINBOW;
+    notif.duration = NOTIFY_DEFAULT_DURATION;
+    notif.pending = false;
+}
+
+static void resetTextNotificationQueue() {
+    textNotifHead = 0;
+    textNotifTail = 0;
+    textNotifCount = 0;
+    for (uint8_t i = 0; i < NOTIFY_QUEUE_LEN; i++) {
+        resetTextNotification(textNotifQueue[i]);
+    }
+}
 
 static void initRuntimeDefaults() {
     mqttServer = "";
@@ -45,12 +68,8 @@ static void initRuntimeDefaults() {
     clockConfigDirty = true;
     clockTimeValid = false;
 
-    textNotif.text[0] = '\0';
-    textNotif.color = NOTIFY_DEFAULT_COLOR_RGB565;
-    textNotif.size = NOTIFY_DEFAULT_SIZE;
-    textNotif.rainbow = NOTIFY_DEFAULT_RAINBOW;
-    textNotif.duration = NOTIFY_DEFAULT_DURATION;
-    textNotif.pending = false;
+    resetTextNotification(textNotif);
+    resetTextNotificationQueue();
 }
 
 static void mqttPublishClockState() {
@@ -155,17 +174,44 @@ void applyClockConfigPayload(const char *payload) {
  *  JSON: {"text":"…","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
  *  Plain text: entire payload used as message with defaults.
  * ================================================================= */
+bool hasPendingTextNotification() {
+    bool pending;
+    taskENTER_CRITICAL(&textNotifMux);
+    pending = (textNotifCount > 0);
+    taskEXIT_CRITICAL(&textNotifMux);
+    return pending;
+}
+
+bool takePendingTextNotification(TextNotification *out) {
+    if (!out) return false;
+
+    bool havePending = false;
+    taskENTER_CRITICAL(&textNotifMux);
+    if (textNotifCount > 0) {
+        const TextNotification &queued = textNotifQueue[textNotifHead];
+        memcpy(out->text, queued.text, sizeof(queued.text));
+        out->color = queued.color;
+        out->size = queued.size;
+        out->rainbow = queued.rainbow;
+        out->duration = queued.duration;
+        out->pending = false;
+        resetTextNotification(textNotifQueue[textNotifHead]);
+        textNotifHead = (uint8_t)((textNotifHead + 1) % NOTIFY_QUEUE_LEN);
+        textNotifCount--;
+        havePending = true;
+    }
+    taskEXIT_CRITICAL(&textNotifMux);
+
+    return havePending;
+}
+
 void applyTextNotification(const char *payload) {
     String s(payload);
     s.trim();
     if (s.length() == 0) return;
 
-    // Reset to defaults
-    textNotif.color      = NOTIFY_DEFAULT_COLOR_RGB565;
-    textNotif.size       = NOTIFY_DEFAULT_SIZE;
-    textNotif.rainbow    = NOTIFY_DEFAULT_RAINBOW;
-    textNotif.duration   = NOTIFY_DEFAULT_DURATION;
-    textNotif.text[0]    = '\0';
+    TextNotification nextNotif;
+    resetTextNotification(nextNotif);
 
     if (s.startsWith("{")) {
         // --- JSON payload ---
@@ -176,7 +222,7 @@ void applyTextNotification(const char *payload) {
             if (tq1 >= 0) {
                 int tq2 = s.indexOf('"', tq1 + 1);
                 if (tq2 > tq1)
-                    s.substring(tq1 + 1, tq2).toCharArray(textNotif.text, sizeof(textNotif.text));
+                    s.substring(tq1 + 1, tq2).toCharArray(nextNotif.text, sizeof(nextNotif.text));
             }
         }
 
@@ -189,32 +235,62 @@ void applyTextNotification(const char *payload) {
             uint8_t r = (uint8_t)((v >> 16) & 0xFF);
             uint8_t g = (uint8_t)((v >> 8)  & 0xFF);
             uint8_t b = (uint8_t)( v        & 0xFF);
-            if (dma_display) textNotif.color = dma_display->color565(r, g, b);
+            if (dma_display) nextNotif.color = dma_display->color565(r, g, b);
         }
 
         // size (1–3)
         int si = s.indexOf("\"size\":");
         if (si >= 0) {
             int sv = s.substring(si + 7).toInt();
-            if (sv >= 1 && sv <= 3) textNotif.size = (uint8_t)sv;
+            if (sv >= 1 && sv <= 3) nextNotif.size = (uint8_t)sv;
         }
 
         // effect
-        if (s.indexOf("\"effect\":\"rainbow\"") >= 0) textNotif.rainbow = true;
+        if (s.indexOf("\"effect\":\"rainbow\"") >= 0) nextNotif.rainbow = true;
 
         // duration: loops for scrolling text, seconds for non-scrolling text
         int di = s.indexOf("\"duration\":");
-        if (di >= 0) textNotif.duration = (uint32_t)s.substring(di + 11).toInt();
+        if (di >= 0) nextNotif.duration = (uint32_t)s.substring(di + 11).toInt();
     } else {
         // --- Plain-text payload ---
-        s.toCharArray(textNotif.text, sizeof(textNotif.text));
+        s.toCharArray(nextNotif.text, sizeof(nextNotif.text));
     }
 
-    if (textNotif.text[0] != '\0') {
-        textNotif.pending = true;
-        Serial.printf("[NOTIFY] text='%s' size=%d rainbow=%d dur=%u\n",
-                      textNotif.text, textNotif.size,
-                      (int)textNotif.rainbow, textNotif.duration);
+    if (nextNotif.text[0] != '\0') {
+        bool enqueued = false;
+        uint8_t depth = 0;
+        taskENTER_CRITICAL(&textNotifMux);
+        if (textNotifCount < NOTIFY_QUEUE_LEN) {
+            TextNotification &slot = textNotifQueue[textNotifTail];
+            memcpy(slot.text, nextNotif.text, sizeof(slot.text));
+            slot.color = nextNotif.color;
+            slot.size = nextNotif.size;
+            slot.rainbow = nextNotif.rainbow;
+            slot.duration = nextNotif.duration;
+            slot.pending = true;
+
+            textNotifTail = (uint8_t)((textNotifTail + 1) % NOTIFY_QUEUE_LEN);
+            textNotifCount++;
+            depth = textNotifCount;
+
+            memcpy(textNotif.text, nextNotif.text, sizeof(textNotif.text));
+            textNotif.color = nextNotif.color;
+            textNotif.size = nextNotif.size;
+            textNotif.rainbow = nextNotif.rainbow;
+            textNotif.duration = nextNotif.duration;
+            textNotif.pending = true;
+            enqueued = true;
+        }
+        taskEXIT_CRITICAL(&textNotifMux);
+
+        if (enqueued) {
+            Serial.printf("[NOTIFY] queued text='%s' size=%d rainbow=%d dur=%u depth=%u\n",
+                          nextNotif.text, nextNotif.size,
+                          (int)nextNotif.rainbow, nextNotif.duration, depth);
+        } else {
+            Serial.printf("[NOTIFY] dropped text='%s' (queue full: %u)\n",
+                          nextNotif.text, (unsigned)NOTIFY_QUEUE_LEN);
+        }
     }
 }
 
