@@ -3,6 +3,7 @@
 #include "mqtt.h"
 #include <WiFi.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 
 /* =================================================================
@@ -343,6 +344,45 @@ static void handleNotify() {
     webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Notification accepted\"}");
 }
 
+/* OTA upload response (called after upload completes or fails) */
+static void handleOtaFinal() {
+    if (Update.hasError()) {
+        String err = "OTA failed: ";
+        err += Update.errorString();
+        Serial.println("[OTA] " + err);
+        webServer.send(500, "application/json", "{\"ok\":false,\"msg\":\"" + err + "\"}");
+    } else {
+        Serial.println("[OTA] Update successful — rebooting");
+        webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Update successful. Rebooting...\"}");
+        delay(500);
+        ESP.restart();
+    }
+}
+
+/* OTA upload progress handler (called per chunk by WebServer) */
+static void handleOtaUpload() {
+    HTTPUpload &upload = webServer.upload();
+
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("[OTA] Starting update: %s (%u bytes)\n",
+                      upload.filename.c_str(), upload.totalSize);
+        showMessage("OTA...", dma_display->color565(255, 200, 0));
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            Serial.printf("[OTA] begin() error: %s\n", Update.errorString());
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            Serial.printf("[OTA] write() error: %s\n", Update.errorString());
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {
+            Serial.printf("[OTA] Upload complete: %u bytes\n", upload.totalSize);
+        } else {
+            Serial.printf("[OTA] end() error: %s\n", Update.errorString());
+        }
+    }
+}
+
 static void handleNotFound() {
     if (apMode) {
         handleCaptiveRedirect();
@@ -364,6 +404,7 @@ void wifiSetup() {
     webServer.on("/panel", HTTP_POST, handlePanel);
     webServer.on("/clock", HTTP_POST, handleClockSave);
     webServer.on("/notify", HTTP_POST, handleNotify);
+    webServer.on("/update", HTTP_POST, handleOtaFinal, handleOtaUpload);
     webServer.on("/generate_204", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/connecttest.txt", HTTP_GET, handleCaptiveRedirect);
