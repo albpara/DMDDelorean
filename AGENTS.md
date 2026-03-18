@@ -285,6 +285,7 @@ Routes currently registered by `wifiSetup()`:
 - `POST /panel`
 - `POST /clock`
 - `POST /notify`
+- `POST /update` (OTA firmware upload — multipart/form-data, field `firmware`, binary `.bin`; device reboots on success)
 - captive-portal redirects for common OS probe URLs
 
 ---
@@ -327,3 +328,4 @@ pio device monitor
 6. **Playback debug trace:** added serial logging for the GIF being played (`[PLAY] GIF idx=... path=...`).
 7. **Clock visual tuning:** clock mode now renders time/date in dark green tones instead of white/gray.
 8. **Phase 1 HA dashboard mode:** added MQTT-driven rotating dashboard cards (`text`/`sensor`), persisted dashboard settings (`enabled`, `dwell`, `profile`), and Home Assistant discovery entities for dashboard mode, dwell, and profile.
+9. **OTA firmware update:** added `POST /update` HTTP endpoint (multipart `firmware` field) using the ESP32 `Update` library. The captive portal UI now includes an "Upload Firmware" section with a file picker and progress bar. The device reboots automatically on success. Yellow "OTA..." message shown on panel during upload.

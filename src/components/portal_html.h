@@ -33,6 +33,9 @@ select{margin-top:4px}
 .toggle input:checked+.sl::before{transform:translateX(24px)}
 .spin::after{content:'';display:inline-block;width:11px;height:11px;border:2px solid #8dff8e;border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;margin-left:6px;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
+.btn-ota{background:#2d1f08;border-color:#8c6a1e}
+.progress-bar{width:100%;background:#07120a;border:1px solid #2a6e37;border-radius:2px;margin-top:8px;height:18px;display:none}
+.progress-bar div{height:100%;background:#2e8c43;border-radius:2px;width:0;transition:width .2s}
 </style></head><body>
 <h2>DeLorean DMD</h2>
 
@@ -86,6 +89,13 @@ select{margin-top:4px}
 <input id="ctz" placeholder="UTC0" value="UTC0">
 <button class="btn-clock" onclick="clockSave()">Save Clock Settings</button>
 <div id="cst" class="msg"></div>
+
+<h3>Firmware Update (OTA)</h3>
+<label for="fwfile">Select .bin firmware file</label>
+<input type="file" id="fwfile" accept=".bin" style="padding:6px 0">
+<button class="btn-ota" onclick="otaUpload()">Upload Firmware</button>
+<div class="progress-bar" id="otapb"><div id="otafill"></div></div>
+<div id="ost" class="msg"></div>
 
 <script>
 var W=document.getElementById('wst'),M=document.getElementById('mst'),P=document.getElementById('pst'),C=document.getElementById('cst');
@@ -141,6 +151,22 @@ body:'enabled='+en+'&every='+encodeURIComponent(ev)+'&tz='+encodeURIComponent(tz
 .then(r=>r.json()).then(d=>{
 C.className='msg '+(d.ok?'ok':'err');C.textContent=d.msg||'';
 }).catch(()=>{C.className='msg err';C.textContent='Request failed';});}
+
+function otaUpload(){
+var f=document.getElementById('fwfile').files[0];
+var O=document.getElementById('ost'),pb=document.getElementById('otapb'),fill=document.getElementById('otafill');
+if(!f){O.className='msg err';O.textContent='Select a .bin file first';return;}
+var fd=new FormData();fd.append('firmware',f);
+var xhr=new XMLHttpRequest();
+xhr.open('POST','/update');
+xhr.upload.onprogress=function(e){
+if(e.lengthComputable){var p=Math.round(e.loaded/e.total*100);fill.style.width=p+'%';O.textContent='Uploading… '+p+'%';}};
+xhr.onloadstart=function(){pb.style.display='block';O.className='msg';O.innerHTML='Starting upload<span class="spin"></span>';};
+xhr.onload=function(){
+try{var d=JSON.parse(xhr.responseText);O.className='msg '+(d.ok?'ok':'err');O.textContent=d.msg||'';}
+catch(e){O.className='msg err';O.textContent='Unexpected response';}};
+xhr.onerror=function(){O.className='msg err';O.textContent='Upload failed';};
+xhr.send(fd);}
 
 fetch('/status').then(r=>r.json()).then(d=>{
 if(d.connected)W.innerHTML='<span class="ok">Connected to '+d.ssid+' &mdash; IP: '+d.ip+'</span>';
