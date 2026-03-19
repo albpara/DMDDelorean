@@ -216,6 +216,8 @@ static void handleStatus() {
     json += brightness;
     json += ",\"max_brightness\":";
     json += MAX_BRIGHTNESS_VAL;
+    json += ",\"safe_brightness\":";
+    json += safeBrightness ? "true" : "false";
 
     // Clock mode state
     json += ",\"clock\":{\"enabled\":";
@@ -280,16 +282,23 @@ static void handlePanel() {
     if (br < 0) br = 0;
     if (br > 255) br = 255;
 
+    // Optional safe brightness toggle: "safe=1" enables, "safe=0" disables.
+    // Only act if the argument is explicitly provided.
+    if (webServer.hasArg("safe")) {
+        bool safe = webServer.arg("safe") != "0";
+        applySafeBrightness(safe);
+    }
+
     applyPanelOn(on);
     applyBrightness((uint8_t)br);
     mqttPublishState();
 
-    uint8_t effective = (brightness > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : brightness;
+    uint8_t effective = (safeBrightness && brightness > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : brightness;
     String resp = "{\"ok\":true,\"msg\":\"";
     resp += on ? "ON" : "OFF";
     resp += ", brightness=";
     resp += effective;
-    if (brightness > MAX_BRIGHTNESS_VAL) {
+    if (safeBrightness && brightness > MAX_BRIGHTNESS_VAL) {
         resp += " (capped from ";
         resp += brightness;
         resp += ")";

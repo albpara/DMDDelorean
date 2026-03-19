@@ -52,8 +52,9 @@
  * ================================================================= */
 #define MAX_GIF_SIZE       (300 * 1024)  // 300 KB ceiling per GIF file
 #define LISTA_PATH         "/lista.txt"
-#define DEFAULT_BRIGHTNESS 25            // 0-255 (~10%)
-#define MAX_BRIGHTNESS     80            // Hard cap — no dedicated PSU, protect ESP32
+#define DEFAULT_BRIGHTNESS      25    // 0-255 (~10%)
+#define MAX_BRIGHTNESS          40    // Safe cap (~16%) — panel powered through ESP32/USB
+#define DEFAULT_SAFE_BRIGHTNESS true  // Enforce MAX_BRIGHTNESS cap by default
 #define RANDOM_PLAYBACK    true          // true = shuffle, false = sequential
 
 /* Anti-ghosting / display tuning (from RetroPixelLED reference) */
