@@ -237,12 +237,25 @@ The firmware currently publishes Home Assistant discovery for:
 - dashboard mode switch (`{topic}/dashboard/mode/set`, `{topic}/dashboard/state`)
 - dashboard dwell number (`{topic}/dashboard/dwell/set`, `{topic}/dashboard/state`)
 - dashboard profile select (`{topic}/dashboard/profile/set`, `{topic}/dashboard/state`)
+- **safe brightness switch** (`{topic}/brightness/safe/set`, `{topic}/brightness/safe/state`) — `entity_category: config`
 
 Other important MQTT topics:
 - brightness set topic: `{topic}/brightness/set`
 - notification topic: `{topic}/notify`
 - dashboard card list topic: `{topic}/dashboard/set`
 - availability topic: `{topic}/available`
+
+### Safe Brightness (power-protection cap)
+
+- `MAX_BRIGHTNESS` is a compile-time cap (currently **40**, ~16%) to protect the ESP32 when the panel draws power through the USB rail.
+- At runtime, `safeBrightness` (bool, default `true`) controls whether the cap is enforced.
+- When `safeBrightness` is `true`: all brightness values are silently clamped to `MAX_BRIGHTNESS_VAL` before reaching hardware.
+- When `safeBrightness` is `false`: the full 0–255 range is allowed (for use with a dedicated panel PSU).
+- The setting persists in NVS namespace `panel`, key `safe_br`.
+- Every call to `applyBrightness()` emits a serial log: `[BRIGHT] requested=N effective=N safe=ON|OFF`.
+- The HA light entity `brightness_scale` is set dynamically: `MAX_BRIGHTNESS_VAL` when safe is ON, `255` when safe is OFF. `mqttPublishDiscovery()` is re-called when the setting changes so HA's slider updates.
+- `applySafeBrightness(bool)` — set + persist + re-apply brightness + re-publish discovery.
+- `loadPanelConfig()` — load `safe_br` from NVS; called by `mqttSetup()`.
 
 ### Dashboard mode details (Phase 1)
 
@@ -318,7 +331,7 @@ pio device monitor
 
 ---
 
-## Recent Firmware Updates (2026-03-17)
+## Recent Firmware Updates (2026-03-19)
 
 1. **Centralized configuration:** moved firmware constants from multiple files into `src/components/app_config.h`.
 2. **WiFi robustness at boot:** added background retry logic for saved credentials (internal compile-time settings only).
@@ -329,3 +342,13 @@ pio device monitor
 7. **Clock visual tuning:** clock mode now renders time/date in dark green tones instead of white/gray.
 8. **Phase 1 HA dashboard mode:** added MQTT-driven rotating dashboard cards (`text`/`sensor`), persisted dashboard settings (`enabled`, `dwell`, `profile`), and Home Assistant discovery entities for dashboard mode, dwell, and profile.
 9. **OTA firmware update:** added `POST /update` HTTP endpoint (multipart `firmware` field) using the ESP32 `Update` library. The captive portal UI now includes an "Upload Firmware" section with a file picker and progress bar. The device reboots automatically on success. Yellow "OTA..." message shown on panel during upload.
+10. **Safe brightness cap tuning and toggle:**
+    - Lowered `MAX_BRIGHTNESS` from 80 → **40** (~16%) for safer operation when the panel is powered via the ESP32/USB rail without a dedicated PSU.
+    - Added `DEFAULT_SAFE_BRIGHTNESS` constant (`true` by default).
+    - Added `bool safeBrightness` runtime variable (NVS-persisted in `panel/safe_br`).
+    - `applyBrightness()` now emits `[BRIGHT] requested=N effective=N safe=ON|OFF` log on every call.
+    - `applySafeBrightness(bool)` toggles the cap, persists it, re-applies current brightness and re-publishes HA discovery.
+    - `loadPanelConfig()` loads `safe_br` from NVS at boot (called by `mqttSetup()`).
+    - Added **"DMD Safe Brightness"** switch to HA discovery (`entity_category: config`, topic `{topic}/brightness/safe/set`).
+    - Light entity `brightness_scale` is now dynamic: `MAX_BRIGHTNESS_VAL` when safe=ON, 255 when safe=OFF.
+    - `POST /panel` accepts optional `safe=0|1` argument; `GET /status` returns `safe_brightness` bool.

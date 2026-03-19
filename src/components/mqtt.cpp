@@ -12,8 +12,9 @@ bool     mqttEnabled   = false;
 unsigned long mqttLastRetry = 0;
 
 // Panel state
-bool    panelOn    = false;
-uint8_t brightness = 0;
+bool    panelOn       = false;
+uint8_t brightness    = 0;
+bool    safeBrightness = true;
 
 // Clock mode state
 bool     clockModeEnabled = false;
@@ -140,6 +141,7 @@ static void initRuntimeDefaults() {
 
     panelOn = true;
     brightness = DEFAULT_BRIGHTNESS;
+    safeBrightness = DEFAULT_SAFE_BRIGHTNESS;
 
     clockModeEnabled = false;
     clockEveryNGifs = CLOCK_DEFAULT_EVERY;
@@ -592,8 +594,10 @@ void applyDashboardPayload(const char *payload) {
  * ================================================================= */
 void applyBrightness(uint8_t val) {
     brightness = val;
-    uint8_t capped = (val > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : val;
+    uint8_t capped = (safeBrightness && val > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : val;
     if (dma_display) dma_display->setBrightness8(panelOn ? capped : 0);
+    Serial.printf("[BRIGHT] requested=%u effective=%u safe=%s\n",
+                  val, panelOn ? capped : 0, safeBrightness ? "ON" : "OFF");
 }
 
 void applyPanelOn(bool on) {
@@ -602,10 +606,31 @@ void applyPanelOn(bool on) {
         if (!on) {
             dma_display->setBrightness8(0);
         } else {
-            uint8_t capped = (brightness > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : brightness;
+            uint8_t capped = (safeBrightness && brightness > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : brightness;
             dma_display->setBrightness8(capped);
         }
     }
+}
+
+void applySafeBrightness(bool safe) {
+    safeBrightness = safe;
+    Preferences prefs;
+    prefs.begin("panel", false);
+    prefs.putBool("safe_br", safe);
+    prefs.end();
+    // Re-apply current brightness so the cap change takes effect immediately
+    applyBrightness(brightness);
+    // Re-publish discovery so HA updates the brightness slider scale
+    mqttPublishDiscovery();
+    Serial.printf("[BRIGHT] safe_brightness=%s\n", safe ? "ON" : "OFF");
+}
+
+void loadPanelConfig() {
+    Preferences prefs;
+    prefs.begin("panel", true);
+    safeBrightness = prefs.getBool("safe_br", DEFAULT_SAFE_BRIGHTNESS);
+    prefs.end();
+    Serial.printf("[BRIGHT] loadPanelConfig safe_brightness=%s\n", safeBrightness ? "ON" : "OFF");
 }
 
 /* =================================================================
@@ -630,6 +655,7 @@ void mqttPublishDiscovery() {
 
     String ip = WiFi.localIP().toString();
     String lightDiscTopic = "homeassistant/light/" + mqttClientId + "/config";
+    uint8_t bScale = safeBrightness ? MAX_BRIGHTNESS_VAL : 255;
     String payload = "{\"name\":\"DeLorean DMD\""
         ",\"unique_id\":\"" + mqttClientId + "\""
         ",\"object_id\":\"" + mqttClientId + "\""
@@ -637,7 +663,7 @@ void mqttPublishDiscovery() {
         ",\"command_topic\":\"" + mqttTopic + "/set\""
         ",\"state_topic\":\"" + mqttTopic + "/state\""
         ",\"brightness\":true"
-        ",\"brightness_scale\":" + String(MAX_BRIGHTNESS_VAL) +
+        ",\"brightness_scale\":" + String(bScale) +
         ",\"device\":{"
             "\"identifiers\":[\"" + mqttClientId + "\"]"
             ",\"name\":\"DeLorean DMD\""
@@ -785,6 +811,31 @@ void mqttPublishDiscovery() {
         "}"
         "}";
     mqttClient.publish(dashProfileDiscTopic.c_str(), dashProfilePayload.c_str(), true);
+
+    String safeBrDiscTopic = "homeassistant/switch/" + mqttClientId + "_safe_brightness/config";
+    String safeBrPayload = "{\"name\":\"DMD Safe Brightness\""
+        ",\"unique_id\":\"" + mqttClientId + "_safe_brightness\""
+        ",\"object_id\":\"" + mqttClientId + "_safe_brightness\""
+        ",\"command_topic\":\"" + mqttTopic + "/brightness/safe/set\""
+        ",\"state_topic\":\"" + mqttTopic + "/brightness/safe/state\""
+        ",\"payload_on\":\"ON\""
+        ",\"payload_off\":\"OFF\""
+        ",\"state_on\":\"ON\""
+        ",\"state_off\":\"OFF\""
+        ",\"entity_category\":\"config\""
+        ",\"icon\":\"mdi:shield-lock\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(safeBrDiscTopic.c_str(), safeBrPayload.c_str(), true);
 }
 
 /* =================================================================
@@ -798,6 +849,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String t(topic);
     String cmdTopic    = mqttTopic + "/set";
     String brTopic     = mqttTopic + "/brightness/set";
+    String safeBrTopic = mqttTopic + "/brightness/safe/set";
     String notifyTopic = mqttTopic + "/notify";
     String clockTopic  = mqttTopic + "/clock/set";
     String clockEveryTopic = mqttTopic + "/clock/every/set";
@@ -824,6 +876,14 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
             applyBrightness((uint8_t)val);
             mqttPublishState();
         }
+    } else if (t == safeBrTopic) {
+        String s(msg);
+        s.trim();
+        s.toUpperCase();
+        bool safe = (s == "ON" || s == "1" || s == "TRUE");
+        applySafeBrightness(safe);
+        String safeBrStateTopic = mqttTopic + "/brightness/safe/state";
+        mqttClient.publish(safeBrStateTopic.c_str(), safeBrightness ? "ON" : "OFF", true);
     } else if (t == notifyTopic) {
         // Delegate to shared parser: JSON or plain-text payload
         applyTextNotification(msg);
@@ -890,6 +950,7 @@ void mqttConnect() {
         mqttClient.publish(availTopic.c_str(), "online", true);
         String cmdTopic    = mqttTopic + "/set";
         String brTopic     = mqttTopic + "/brightness/set";
+        String safeBrTopic = mqttTopic + "/brightness/safe/set";
         String notifyTopic = mqttTopic + "/notify";
         String clockTopic  = mqttTopic + "/clock/set";
         String clockEveryTopic = mqttTopic + "/clock/every/set";
@@ -900,6 +961,7 @@ void mqttConnect() {
         String dashProfileTopic = mqttTopic + "/dashboard/profile/set";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
+        mqttClient.subscribe(safeBrTopic.c_str());
         mqttClient.subscribe(notifyTopic.c_str());
         mqttClient.subscribe(clockTopic.c_str());
         mqttClient.subscribe(clockEveryTopic.c_str());
@@ -920,6 +982,8 @@ void mqttConnect() {
         mqttPublishState();
         mqttPublishClockState();
         mqttPublishDashboardState();
+        String safeBrStateTopic = mqttTopic + "/brightness/safe/state";
+        mqttClient.publish(safeBrStateTopic.c_str(), safeBrightness ? "ON" : "OFF", true);
     } else {
         Serial.printf("[MQTT] Failed, rc=%d\n", mqttClient.state());
     }
@@ -952,6 +1016,7 @@ void mqttSetup() {
     loadMqttConfig();
     loadClockConfig();
     loadDashboardConfig();
+    loadPanelConfig();
 }
 
 void mqttLoop() {

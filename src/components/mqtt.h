@@ -17,6 +17,7 @@ extern unsigned long mqttLastRetry;
 /* Panel state (shared with wifi_portal and main) */
 extern bool    panelOn;
 extern uint8_t brightness;
+extern bool    safeBrightness;  // When true, brightness is capped at MAX_BRIGHTNESS
 
 /* Clock mode state/config (shared with main and wifi_portal) */
 extern bool     clockModeEnabled;
@@ -68,6 +69,8 @@ void loadDashboardConfig();
 
 void applyBrightness(uint8_t val);
 void applyPanelOn(bool on);
+void applySafeBrightness(bool safe);
+void loadPanelConfig();
 
 void mqttPublishState();
 void mqttPublishDiscovery();

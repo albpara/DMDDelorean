@@ -70,7 +70,10 @@ button:active{top:6px;box-shadow:0 0 #cc9900}
 <input type="range" id="pbr" min="0" max="255" value="25" oninput="document.getElementById('bv').textContent=this.value" onchange="panelCtl()">
 <span id="bv">25</span>
 </div>
-<button onclick="panelCtl()">Apply</button>
+<div class="row">
+<label>Safe</label>
+<label class="tgl"><input type="checkbox" id="psafe" onchange="panelCtl()"><span class="sl"></span></label>
+</div>
 <div id="pst" class="msg"></div>
 </div>
 </details>
@@ -184,9 +187,9 @@ M.className='msg '+(d.ok?'ok':'err');M.textContent=d.msg;
 }).catch(()=>{M.className='msg err';M.textContent='Request failed';});}
 
 function panelCtl(){
-var on=document.getElementById('pon').checked?1:0,br=document.getElementById('pbr').value;
+var on=document.getElementById('pon').checked?1:0,br=document.getElementById('pbr').value,safe=document.getElementById('psafe').checked?1:0;
 fetch('/panel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-body:'on='+on+'&brightness='+br})
+body:'on='+on+'&brightness='+br+'&safe='+safe})
 .then(r=>r.json()).then(d=>{
 P.className='msg '+(d.ok?'ok':'err');P.textContent=d.msg||'';
 }).catch(()=>{P.className='msg err';P.textContent='Request failed';});}
@@ -226,6 +229,7 @@ if(m.connected){M.innerHTML='<span class="ok">MQTT connected</span>';document.ge
 else if(m.server)M.innerHTML='<span class="err">MQTT not connected</span>';}
 document.getElementById('pon').checked=d.panel_on;
 document.getElementById('pbr').value=d.brightness;document.getElementById('bv').textContent=d.brightness;
+if(d.safe_brightness!==undefined)document.getElementById('psafe').checked=d.safe_brightness;
 if(d.clock){
 document.getElementById('cen').checked=d.clock.enabled;
 document.getElementById('ce').value=d.clock.every||5;
