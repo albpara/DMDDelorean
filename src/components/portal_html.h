@@ -42,9 +42,9 @@ button:active{top:6px;box-shadow:0 0 #cc9900}
 .tgl{position:relative;width:52px;height:28px;flex-shrink:0}
 .tgl input{opacity:0;width:0;height:0}
 .sl{position:absolute;inset:0;background:#ccc;border:3px solid #000;cursor:pointer;transition:.18s}
-.sl::before{content:'';position:absolute;width:18px;height:18px;left:2px;bottom:2px;background:#fff;border:1px solid #888;transition:.18s}
+.sl::before{content:'';position:absolute;width:18px;height:100%;left:0;background:#fff;transition:.18s}
 .tgl input:checked+.sl{background:#33cc33;border-color:#009900}
-.tgl input:checked+.sl::before{transform:translateX(24px)}
+.tgl input:checked+.sl::before{transform:translateX(200%)}
 .spin::after{content:'';display:inline-block;width:12px;height:12px;border:3px solid #000;border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;margin-left:8px;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 .pbar{background:#000;border:4px solid #000;width:100%;height:28px;margin-top:12px;position:relative;overflow:hidden;display:none}
@@ -52,7 +52,6 @@ button:active{top:6px;box-shadow:0 0 #cc9900}
 </style></head><body>
 <header>
 <h1>DeLorean DMD</h1>
-<p>ESP32 &#xb7; HUB75 128&#xd7;32</p>
 </header>
 
 <details id="s-panel" open>
