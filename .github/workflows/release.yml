@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]*'
   release:
     types: [published]
 
@@ -33,12 +34,9 @@ jobs:
       - name: Build firmware
         run: pio run
 
-      - name: Rename firmware binary
-        run: cp .pio/build/esp32dev/firmware.bin delorean-dmd-${{ github.ref_name }}.bin
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "DeLorean DMD ${{ github.ref_name }}"
           generate_release_notes: true
-          files: delorean-dmd-${{ github.ref_name }}.bin
+          files: .pio/build/esp32dev/firmware.bin
