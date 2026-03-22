@@ -35,7 +35,7 @@ If behavior changes and this file is not updated, future agents will make wrong 
 |-------|-------------|
 | **Display** | ESP32-HUB75-MatrixPanel-I2S-DMA library. Single DMA buffer (double DMA is disabled to preserve correct GIF inter-frame state with transparency). |
 | **GIF Decoder** | `bitbank2/AnimatedGIF`. Supports both memory-based (`open(buf, size, cb)`) and file-based (`open(path, openCB, closeCB, readCB, seekCB, drawCB)`) decoding. |
-| **Playlist Index** | `/lista.txt` is parsed into a compact offset table (`gifOffsets`) instead of storing full path strings in RAM. |
+| **Playlist Index** | A compact offset table (`gifOffsets`) is used instead of storing full path strings in RAM. The table is cached on SD at `/lista.idx` and reused on boot when `/lista.txt` size matches. If cache is missing/invalid, firmware rebuilds from `/lista.txt` and writes a fresh cache. |
 | **Double Buffer** | Two PSRAM buffers (`gifBuf[0]`, `gifBuf[1]`). While Core 1 plays one buffer, a FreeRTOS task on Core 0 pre-loads the next GIF into the other. Buffers swap instantly between GIFs. Falls back to direct SD file reads when PSRAM is not available. |
 | **SD Card** | SPI (VSPI) bus, protected by a FreeRTOS mutex (`sdMutex`). SD access is serialized because playlist lookup, preload, playback fallback, and playback debug path logging all touch the card. |
 | **Networking** | WiFi captive portal, HTTP API, DNS captive redirection, and MQTT all run on a dedicated FreeRTOS task (`networkTaskFn`) on Core 0. |
@@ -352,3 +352,8 @@ pio device monitor
     - Added **"DMD Safe Brightness"** switch to HA discovery (`entity_category: config`, topic `{topic}/brightness/safe/set`).
     - Light entity `brightness_scale` is now dynamic: `MAX_BRIGHTNESS_VAL` when safe=ON, 255 when safe=OFF.
     - `POST /panel` accepts optional `safe=0|1` argument; `GET /status` returns `safe_brightness` bool.
+11. **Playlist index cache on SD:**
+    - Added `/lista.idx` binary cache for `gifOffsets` to reduce startup delay on large playlists.
+    - Boot now attempts to load `/lista.idx` first and validates it against `/lista.txt` file size.
+    - If cache is missing/invalid, firmware rebuilds offsets from `/lista.txt` and writes a fresh `/lista.idx`.
+    - Added compile-time constants in `src/components/app_config.h`: `LISTA_INDEX_PATH`, `LISTA_INDEX_MAGIC`, `LISTA_INDEX_VERSION`.

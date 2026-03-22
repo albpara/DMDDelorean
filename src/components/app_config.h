@@ -52,6 +52,9 @@
  * ================================================================= */
 #define MAX_GIF_SIZE       (300 * 1024)  // 300 KB ceiling per GIF file
 #define LISTA_PATH         "/lista.txt"
+#define LISTA_INDEX_PATH   "/lista.idx"
+#define LISTA_INDEX_MAGIC  0x4C495844UL  // "LIXD"
+#define LISTA_INDEX_VERSION 1
 #define DEFAULT_BRIGHTNESS      25    // 0-255 (~10%)
 #define MAX_BRIGHTNESS          40    // Safe cap (~16%) — panel powered through ESP32/USB
 #define DEFAULT_SAFE_BRIGHTNESS true  // Enforce MAX_BRIGHTNESS cap by default
