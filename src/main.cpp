@@ -61,6 +61,14 @@ File sdGifFile;
 // Runtime copy of MAX_BRIGHTNESS for components
 uint8_t MAX_BRIGHTNESS_VAL = MAX_BRIGHTNESS;
 
+struct PlaylistIndexHeader {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t listaSize;
+    uint32_t count;
+};
+
 /* =================================================================
  *  PLAYLIST NAVIGATION — sequential or random (hardware RNG)
  * ================================================================= */
@@ -68,6 +76,98 @@ int nextIdx() {
     if (RANDOM_PLAYBACK && gifCount > 1)
         return (int)(esp_random() % (uint32_t)gifCount);
     return (currentIdx + 1) % gifCount;
+}
+
+static bool loadGifIndex(size_t listaSize) {
+    File idx = SD.open(LISTA_INDEX_PATH, FILE_READ);
+    if (!idx) return false;
+
+    PlaylistIndexHeader hdr;
+    if (idx.read((uint8_t *)&hdr, sizeof(hdr)) != (int)sizeof(hdr)) {
+        idx.close();
+        Serial.println("[IDX] Header read failed");
+        return false;
+    }
+
+    if (hdr.magic != LISTA_INDEX_MAGIC || hdr.version != LISTA_INDEX_VERSION) {
+        idx.close();
+        Serial.println("[IDX] Header mismatch");
+        return false;
+    }
+
+    if (hdr.listaSize != (uint32_t)listaSize || hdr.count == 0) {
+        idx.close();
+        Serial.println("[IDX] Cache metadata mismatch");
+        return false;
+    }
+
+    size_t expectedSize = sizeof(PlaylistIndexHeader) + ((size_t)hdr.count * sizeof(uint32_t));
+    if ((size_t)idx.size() != expectedSize) {
+        idx.close();
+        Serial.println("[IDX] Cache size mismatch");
+        return false;
+    }
+
+    if (gifOffsets) {
+        free(gifOffsets);
+        gifOffsets = nullptr;
+    }
+
+    size_t allocSz = (size_t)hdr.count * sizeof(uint32_t);
+    gifOffsets = (uint32_t *)(psramFound() ? ps_malloc(allocSz) : malloc(allocSz));
+    if (!gifOffsets) {
+        idx.close();
+        Serial.printf("[IDX] Failed to alloc %u B for cache\n", allocSz);
+        return false;
+    }
+
+    if (idx.read((uint8_t *)gifOffsets, allocSz) != (int)allocSz) {
+        idx.close();
+        free(gifOffsets);
+        gifOffsets = nullptr;
+        Serial.println("[IDX] Offset read failed");
+        return false;
+    }
+
+    idx.close();
+    gifCount = (int)hdr.count;
+    Serial.printf("[IDX] Loaded %d offsets from %s\n", gifCount, LISTA_INDEX_PATH);
+    return true;
+}
+
+static bool saveGifIndex(size_t listaSize, int count) {
+    if (!gifOffsets || count <= 0) return false;
+
+    if (SD.exists(LISTA_INDEX_PATH)) {
+        SD.remove(LISTA_INDEX_PATH);
+    }
+
+    File idx = SD.open(LISTA_INDEX_PATH, FILE_WRITE);
+    if (!idx) {
+        Serial.println("[IDX] Failed to open cache for write");
+        return false;
+    }
+
+    PlaylistIndexHeader hdr;
+    hdr.magic = LISTA_INDEX_MAGIC;
+    hdr.version = LISTA_INDEX_VERSION;
+    hdr.reserved = 0;
+    hdr.listaSize = (uint32_t)listaSize;
+    hdr.count = (uint32_t)count;
+
+    size_t dataSz = (size_t)count * sizeof(uint32_t);
+    bool ok = (idx.write((const uint8_t *)&hdr, sizeof(hdr)) == (int)sizeof(hdr));
+    ok = ok && (idx.write((const uint8_t *)gifOffsets, dataSz) == (int)dataSz);
+    idx.close();
+
+    if (!ok) {
+        Serial.println("[IDX] Failed to write full cache");
+        SD.remove(LISTA_INDEX_PATH);
+        return false;
+    }
+
+    Serial.printf("[IDX] Saved %d offsets to %s\n", count, LISTA_INDEX_PATH);
+    return true;
 }
 
 /* =================================================================
@@ -433,6 +533,17 @@ bool loadGifList() {
     size_t fsize = f.size();
     Serial.printf("[..] File opened, size=%u\n", fsize);
 
+    if (loadGifIndex(fsize)) {
+        f.close();
+        return true;
+    }
+
+    if (SD.exists(LISTA_INDEX_PATH)) {
+        Serial.println("[IDX] Cache invalid or unreadable; rebuilding");
+    } else {
+        Serial.println("[IDX] Cache missing; building from lista.txt");
+    }
+
     // --- Pass 1: count valid lines ---
     int count = 0;
     char buf[260];
@@ -487,6 +598,9 @@ bool loadGifList() {
 
     gifCount = idx;
     Serial.printf("[OK] Indexed %d GIF path(s) from lista.txt\n", gifCount);
+    if (!saveGifIndex(fsize, gifCount)) {
+        Serial.println("[IDX] Warning: cache save failed");
+    }
     return gifCount > 0;
 }
 
