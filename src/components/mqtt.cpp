@@ -680,7 +680,7 @@ void mqttPublishDiscovery() {
                   ok ? "sent" : "FAILED", payload.length(), lightDiscTopic.c_str());
 
     String clockSwitchDiscTopic = "homeassistant/switch/" + mqttClientId + "_clock/config";
-    String swPayload = "{\"name\":\"DMD Clock Mode\""
+    String swPayload = "{\"name\":\"Clock Mode\""
         ",\"unique_id\":\"" + mqttClientId + "_clock\""
         ",\"object_id\":\"" + mqttClientId + "_clock\""
         ",\"command_topic\":\"" + mqttTopic + "/clock/set\""
@@ -704,7 +704,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(clockSwitchDiscTopic.c_str(), swPayload.c_str(), true);
 
     String clockNumDiscTopic = "homeassistant/number/" + mqttClientId + "_clock_every/config";
-    String numPayload = "{\"name\":\"DMD Clock Every N GIFs\""
+    String numPayload = "{\"name\":\"Clock Every N GIFs\""
         ",\"unique_id\":\"" + mqttClientId + "_clock_every\""
         ",\"object_id\":\"" + mqttClientId + "_clock_every\""
         ",\"command_topic\":\"" + mqttTopic + "/clock/every/set\""
@@ -725,7 +725,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(clockNumDiscTopic.c_str(), numPayload.c_str(), true);
 
     String rebootBtnDiscTopic = "homeassistant/button/" + mqttClientId + "_reboot/config";
-    String rebootPayload = "{\"name\":\"DMD Reboot\""
+    String rebootPayload = "{\"name\":\"Reboot\""
         ",\"unique_id\":\"" + mqttClientId + "_reboot\""
         ",\"object_id\":\"" + mqttClientId + "_reboot\""
         ",\"command_topic\":\"" + mqttTopic + "/reboot/set\""
@@ -746,7 +746,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(rebootBtnDiscTopic.c_str(), rebootPayload.c_str(), true);
 
     String dashSwitchDiscTopic = "homeassistant/switch/" + mqttClientId + "_dashboard/config";
-    String dashSwitchPayload = "{\"name\":\"DMD Dashboard Mode\""
+    String dashSwitchPayload = "{\"name\":\"Dashboard Mode\""
         ",\"unique_id\":\"" + mqttClientId + "_dashboard\""
         ",\"object_id\":\"" + mqttClientId + "_dashboard\""
         ",\"command_topic\":\"" + mqttTopic + "/dashboard/mode/set\""
@@ -770,7 +770,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(dashSwitchDiscTopic.c_str(), dashSwitchPayload.c_str(), true);
 
     String dashDwellDiscTopic = "homeassistant/number/" + mqttClientId + "_dashboard_dwell/config";
-    String dashDwellPayload = "{\"name\":\"DMD Dashboard Dwell\""
+    String dashDwellPayload = "{\"name\":\"Dashboard Dwell\""
         ",\"unique_id\":\"" + mqttClientId + "_dashboard_dwell\""
         ",\"object_id\":\"" + mqttClientId + "_dashboard_dwell\""
         ",\"command_topic\":\"" + mqttTopic + "/dashboard/dwell/set\""
@@ -792,7 +792,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(dashDwellDiscTopic.c_str(), dashDwellPayload.c_str(), true);
 
     String dashProfileDiscTopic = "homeassistant/select/" + mqttClientId + "_dashboard_profile/config";
-    String dashProfilePayload = "{\"name\":\"DMD Dashboard Profile\""
+    String dashProfilePayload = "{\"name\":\"Dashboard Profile\""
         ",\"unique_id\":\"" + mqttClientId + "_dashboard_profile\""
         ",\"object_id\":\"" + mqttClientId + "_dashboard_profile\""
         ",\"command_topic\":\"" + mqttTopic + "/dashboard/profile/set\""
@@ -813,7 +813,7 @@ void mqttPublishDiscovery() {
     mqttClient.publish(dashProfileDiscTopic.c_str(), dashProfilePayload.c_str(), true);
 
     String safeBrDiscTopic = "homeassistant/switch/" + mqttClientId + "_safe_brightness/config";
-    String safeBrPayload = "{\"name\":\"DMD Safe Brightness\""
+    String safeBrPayload = "{\"name\":\"Safe Brightness\""
         ",\"unique_id\":\"" + mqttClientId + "_safe_brightness\""
         ",\"object_id\":\"" + mqttClientId + "_safe_brightness\""
         ",\"command_topic\":\"" + mqttTopic + "/brightness/safe/set\""
