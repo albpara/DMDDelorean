@@ -42,6 +42,9 @@ struct TextNotification {
     bool     rainbow;     // rainbow colour-cycle effect
     uint32_t duration;    // wide text: loop count, short text: seconds
     volatile bool pending;
+    uint8_t  cardType;    // 0=text/sensor (default), 1=solar energy
+    int32_t  solar_w;     // solar generation in watts  (cardType==1)
+    int32_t  house_w;     // house consumption in watts (cardType==1)
 };
 extern TextNotification textNotif;
 

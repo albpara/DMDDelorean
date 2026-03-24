@@ -310,6 +310,92 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
 }
 
 /* =================================================================
+ *  SOLAR ENERGY CARD
+ * ================================================================= */
+// Renders a 128x32 energy overview:
+//   Top 16 rows  — horizontal bar (surplus: purple=house, green=excess;
+//                                  deficit: green=solar, red=grid draw)
+//   Bottom 16 rows — house_w left (purple), net middle (green/red), solar_w right (orange)
+static void showSolarCard(int solar_w, int house_w, uint32_t duration) {
+    if (!dma_display) return;
+    if (solar_w < 0) solar_w = 0;
+    if (house_w < 0) house_w = 0;
+
+    const uint16_t cGreen     = dma_display->color565(0,   200, 0);
+    const uint16_t cPurple    = dma_display->color565(160, 0,   200);
+    const uint16_t cRed       = dma_display->color565(220, 0,   0);
+    const uint16_t cOrange    = dma_display->color565(255, 120, 0);
+    const uint16_t cDark      = dma_display->color565(15,  15,  15);
+    const uint16_t cTxtPurple = dma_display->color565(160, 0,   200);
+    const uint16_t cTxtGreen  = dma_display->color565(0,   160, 0);
+
+    // Bar occupies rows 2–13 (12 px tall, 2 px padding at top)
+    const int BAR_Y = 2;
+    const int BAR_H = 12;
+    // Text row: vertically centred in bottom half (rows 16–31)
+    const int TXT_Y = 20;
+
+    uint32_t durationMs = ((duration == 0) ? 5 : duration) * 1000UL;
+    unsigned long start = millis();
+
+    while (millis() - start < durationMs) {
+        dma_display->fillScreen(0);
+
+        if (solar_w >= house_w) {
+            // Surplus mode — scale 0..3000 W
+            int housePx  = (house_w * TOTAL_WIDTH) / 3000;
+            int solarPx  = (solar_w * TOTAL_WIDTH) / 3000;
+            if (housePx > TOTAL_WIDTH) housePx = TOTAL_WIDTH;
+            if (solarPx > TOTAL_WIDTH) solarPx = TOTAL_WIDTH;
+            // Dark background for unused portion
+            dma_display->fillRect(0, BAR_Y, TOTAL_WIDTH, BAR_H, cDark);
+            // Purple: house consumption
+            if (housePx > 0)
+                dma_display->fillRect(0, BAR_Y, housePx, BAR_H, cPurple);
+            // Green: solar excess (solar − house)
+            if (solarPx - housePx > 0)
+                dma_display->fillRect(housePx, BAR_Y, solarPx - housePx, BAR_H, cGreen);
+        } else {
+            // Deficit mode — scale 0..house_w, bar fills 100 %
+            int scale   = (house_w > 0) ? house_w : 1;
+            int solarPx = (solar_w * TOTAL_WIDTH) / scale;
+            if (solarPx > TOTAL_WIDTH) solarPx = TOTAL_WIDTH;
+            // Green: fraction covered by solar
+            if (solarPx > 0)
+                dma_display->fillRect(0, BAR_Y, solarPx, BAR_H, cGreen);
+            // Red: grid draw (house − solar)
+            if (TOTAL_WIDTH - solarPx > 0)
+                dma_display->fillRect(solarPx, BAR_Y, TOTAL_WIDTH - solarPx, BAR_H, cRed);
+        }
+
+        // Bottom row: house value left, net value center, solar value right
+        char buf[16];
+        dma_display->setTextSize(1);
+        dma_display->setTextWrap(false);
+
+        snprintf(buf, sizeof(buf), "%dW", house_w);
+        dma_display->setTextColor(cTxtPurple);
+        dma_display->setCursor(2, TXT_Y);
+        dma_display->print(buf);
+
+        int net = solar_w - house_w;
+        snprintf(buf, sizeof(buf), "%+dW", net);
+        int twNet = (int)strlen(buf) * CHAR_W;
+        dma_display->setTextColor((net >= 0) ? cTxtGreen : cRed);
+        dma_display->setCursor((TOTAL_WIDTH - twNet) / 2, TXT_Y);
+        dma_display->print(buf);
+
+        snprintf(buf, sizeof(buf), "%dW", solar_w);
+        int tw = (int)strlen(buf) * CHAR_W;
+        dma_display->setTextColor(cOrange);
+        dma_display->setCursor(TOTAL_WIDTH - tw - 2, TXT_Y);
+        dma_display->print(buf);
+
+        delay(30);
+    }
+}
+
+/* =================================================================
  *  CLOCK MODE — NTP + render helpers
  * ================================================================= */
 static bool ntpConfigured = false;
@@ -743,8 +829,13 @@ void playbackTaskFn(void *) {
         if (dashboardModeEnabled && hasDashboardCards()) {
             TextNotification dashboardCard;
             if (takeNextDashboardCard(&dashboardCard)) {
-                showNotification(dashboardCard.text, dashboardCard.color, dashboardCard.size,
-                                 dashboardCard.rainbow, dashboardCard.duration);
+                if (dashboardCard.cardType == 1) {
+                    showSolarCard(dashboardCard.solar_w, dashboardCard.house_w,
+                                  dashboardCard.duration);
+                } else {
+                    showNotification(dashboardCard.text, dashboardCard.color, dashboardCard.size,
+                                     dashboardCard.rainbow, dashboardCard.duration);
+                }
                 if (dma_display) dma_display->clearScreen();
                 continue;
             }

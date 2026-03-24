@@ -47,6 +47,9 @@ static void resetTextNotification(TextNotification &notif) {
     notif.rainbow = NOTIFY_DEFAULT_RAINBOW;
     notif.duration = NOTIFY_DEFAULT_DURATION;
     notif.pending = false;
+        notif.cardType = 0;
+        notif.solar_w  = 0;
+        notif.house_w  = 0;
 }
 
 static void resetTextNotificationQueue() {
@@ -333,11 +336,7 @@ bool takePendingTextNotification(TextNotification *out) {
     taskENTER_CRITICAL(&textNotifMux);
     if (textNotifCount > 0) {
         const TextNotification &queued = textNotifQueue[textNotifHead];
-        memcpy(out->text, queued.text, sizeof(queued.text));
-        out->color = queued.color;
-        out->size = queued.size;
-        out->rainbow = queued.rainbow;
-        out->duration = queued.duration;
+        *out = queued;
         out->pending = false;
         resetTextNotification(textNotifQueue[textNotifHead]);
         textNotifHead = (uint8_t)((textNotifHead + 1) % NOTIFY_QUEUE_LEN);
@@ -364,11 +363,7 @@ bool takeNextDashboardCard(TextNotification *out) {
     if (dashboardCardCount > 0) {
         uint8_t idx = dashboardCardCursor;
         const TextNotification &card = dashboardCards[idx];
-        memcpy(out->text, card.text, sizeof(card.text));
-        out->color = card.color;
-        out->size = card.size;
-        out->rainbow = card.rainbow;
-        out->duration = card.duration;
+        *out = card;
         out->pending = false;
         dashboardCardCursor = (uint8_t)((dashboardCardCursor + 1) % dashboardCardCount);
         available = true;
@@ -530,6 +525,21 @@ void applyDashboardPayload(const char *payload) {
                         if (unit.length() > 0) built += unit;
                         text = built;
                     }
+                        else if (type == "solar") {
+                            int sw = 0, hw = 0;
+                            jsonExtractInt(obj, "solar_w", &sw);
+                            jsonExtractInt(obj, "house_w", &hw);
+                            int dur = 0;
+                            if (jsonExtractInt(obj, "duration", &dur) && dur > 0)
+                                card.duration = (uint32_t)dur;
+                            card.cardType = 1;
+                            card.solar_w  = (int32_t)sw;
+                            card.house_w  = (int32_t)hw;
+                            if (parsedCount < DASHBOARD_MAX_ITEMS) parsed[parsedCount++] = card;
+                            objStart = -1;
+                            prev = c;
+                            continue;
+                        }
 
                     if (text.length() == 0) {
                         objStart = -1;

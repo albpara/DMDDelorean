@@ -261,7 +261,7 @@ Other important MQTT topics:
 
 - Dashboard mode is opt-in via MQTT (`{topic}/dashboard/mode/set`), OFF by default.
 - Dashboard payload accepts a JSON array of cards on `{topic}/dashboard/set`.
-- Supported card types in Phase 1: `text` and `sensor`.
+- Supported card types: `text`, `sensor`, and **`solar`** (energy overview — see Solar energy card details below).
 - Cards are rotated round-robin by `playbackTaskFn()` on Core 1 when dashboard mode is enabled and at least one card exists.
 - Notification queue still has highest priority; queued notifications preempt dashboard cards.
 - Dashboard settings persist in NVS namespace `dash`:
@@ -330,6 +330,24 @@ pio device monitor
 8. **Some docs may lag the code.** In this repo, prefer `src/components/app_config.h`, `src/components/mqtt.cpp`, `src/components/wifi_portal.cpp`, and `src/main.cpp` over README assumptions.
 
 ---
+
+## Recent Firmware Updates (2026-03-24)
+
+12. **Solar energy dashboard card (`type: solar`):**
+        - New graphical card type rendered entirely with filled rectangles — no text scrolling.
+        - **Top 16 rows** — horizontal bar:
+                - *Surplus (solar ≥ house):* scale = 3000 W; purple = house consumption, green = solar excess, dim = unused headroom.
+                - *Deficit (solar < house):* scale = house_w (bar fills 100 %); green = solar coverage, red = grid draw.
+        - **Bottom 16 rows** — house wattage left in purple, net (solar-house) centred, and solar wattage right in orange (all with "W" suffix).
+            - Net colour: green when exporting (`solar_w >= house_w`), red when importing (`solar_w < house_w`).
+        - `TextNotification` struct gained three new fields: `cardType` (uint8_t, 0=text, 1=solar), `solar_w` (int32_t), `house_w` (int32_t). `resetTextNotification()` zeroes all three.
+        - **MQTT payload** on `{topic}/dashboard/set`:
+            ```json
+            [{"type":"solar","solar_w":2340,"house_w":1850}]
+            ```
+            `duration` (seconds) is optional; defaults to `dashboardDwellSeconds`. Can be mixed with other card types in the same array.
+        - `showSolarCard(solar_w, house_w, duration)` added to `src/main.cpp`.
+        - `playbackTaskFn()` routes cards with `cardType == 1` to `showSolarCard()` instead of `showNotification()`.
 
 ## Recent Firmware Updates (2026-03-19)
 
