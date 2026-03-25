@@ -37,14 +37,15 @@ extern unsigned long wifiConnectedAt;
 /* Text notification (set by MQTT or web UI, consumed by main loop) */
 struct TextNotification {
     char     text[256];
-    uint16_t color;       // packed RGB565
-    uint8_t  size;        // font scale 1–3
-    bool     rainbow;     // rainbow colour-cycle effect
-    uint32_t duration;    // wide text: loop count, short text: seconds
+    uint16_t color;           // packed RGB565
+    uint8_t  size;            // font scale 1–3
+    bool     rainbow;         // rainbow colour-cycle effect
+    uint32_t duration;        // wide/vertical text: loop count, short text: seconds
     volatile bool pending;
-    uint8_t  cardType;    // 0=text/sensor (default), 1=solar energy
-    int32_t  solar_w;     // solar generation in watts  (cardType==1)
-    int32_t  house_w;     // house consumption in watts (cardType==1)
+    uint8_t  cardType;        // 0=text/sensor (default), 1=solar energy
+    int32_t  solar_w;         // solar generation in watts  (cardType==1)
+    int32_t  house_w;         // house consumption in watts (cardType==1)
+    bool     scrollVertical;  // true = scroll lines upward instead of horizontally
 };
 extern TextNotification textNotif;
 
@@ -54,8 +55,9 @@ class MatrixPanel_I2S_DMA;
 extern MatrixPanel_I2S_DMA *dma_display;
 
 // Parse a JSON or plain-text payload and enqueue it for FIFO display.
-// JSON: {"text":"...","color":"#RRGGBB","size":1,"effect":"rainbow","duration":5}
+// JSON: {"text":"...","color":"#RRGGBB","size":1,"effect":"rainbow","scroll":"vertical","duration":5}
 // Plain text: entire payload used as message with defaults.
+// For vertical scroll: text may use \n to separate lines; long lines are auto-wrapped.
 bool hasPendingTextNotification();
 bool takePendingTextNotification(TextNotification *out);
 bool hasDashboardCards();

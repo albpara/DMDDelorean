@@ -89,6 +89,7 @@
 #define NOTIFY_DEFAULT_RAINBOW      false
 #define NOTIFY_DEFAULT_DURATION     5
 #define NOTIFY_QUEUE_LEN            4
+#define VSCROLL_MAX_LINES           32   // max lines for vertical scroll notifications
 
 /* =================================================================
  *  MQTT CONFIGURATION

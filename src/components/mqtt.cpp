@@ -50,6 +50,7 @@ static void resetTextNotification(TextNotification &notif) {
         notif.cardType = 0;
         notif.solar_w  = 0;
         notif.house_w  = 0;
+        notif.scrollVertical = false;
 }
 
 static void resetTextNotificationQueue() {
@@ -415,6 +416,9 @@ void applyTextNotification(const char *payload) {
         // effect
         if (s.indexOf("\"effect\":\"rainbow\"") >= 0) nextNotif.rainbow = true;
 
+        // scroll direction
+        if (s.indexOf("\"scroll\":\"vertical\"") >= 0) nextNotif.scrollVertical = true;
+
         // duration: loops for scrolling text, seconds for non-scrolling text
         int di = s.indexOf("\"duration\":");
         if (di >= 0) nextNotif.duration = (uint32_t)s.substring(di + 11).toInt();
@@ -434,6 +438,7 @@ void applyTextNotification(const char *payload) {
             slot.size = nextNotif.size;
             slot.rainbow = nextNotif.rainbow;
             slot.duration = nextNotif.duration;
+            slot.scrollVertical = nextNotif.scrollVertical;
             slot.pending = true;
 
             textNotifTail = (uint8_t)((textNotifTail + 1) % NOTIFY_QUEUE_LEN);
@@ -445,6 +450,7 @@ void applyTextNotification(const char *payload) {
             textNotif.size = nextNotif.size;
             textNotif.rainbow = nextNotif.rainbow;
             textNotif.duration = nextNotif.duration;
+            textNotif.scrollVertical = nextNotif.scrollVertical;
             textNotif.pending = true;
             enqueued = true;
         }
@@ -571,6 +577,12 @@ void applyDashboardPayload(const char *payload) {
                     if (jsonExtractQuoted(obj, "effect", &effect)) {
                         effect.toLowerCase();
                         if (effect == "rainbow") card.rainbow = true;
+                    }
+
+                    String scroll;
+                    if (jsonExtractQuoted(obj, "scroll", &scroll)) {
+                        scroll.toLowerCase();
+                        if (scroll == "vertical") card.scrollVertical = true;
                     }
 
                     int dur = 0;
