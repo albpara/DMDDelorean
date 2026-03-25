@@ -209,6 +209,120 @@ static void drawRainbowText(const char *msg, int x, int y, uint8_t size, int hue
     }
 }
 
+/* =================================================================
+ *  VERTICAL SCROLL HELPERS
+ * ================================================================= */
+
+// Split text into word-wrapped lines for vertical scrolling.
+// Handles both actual newline characters (0x0A) and the two-char
+// sequence '\' + 'n' (as produced by JSON string literals).
+// Returns the number of lines produced.
+static int buildWrappedLines(const char *text, uint8_t size,
+                              char lines[][TOTAL_WIDTH + 1], int maxLines) {
+    if (!text || !*text) return 0;
+    int maxChars = TOTAL_WIDTH / (CHAR_W * size);
+    if (maxChars < 1) maxChars = 1;
+
+    int lineCount = 0;
+    char lineBuf[TOTAL_WIDTH + 1];
+    int lineBufLen = 0;
+
+    const char *p = text;
+    while (*p && lineCount < maxLines) {
+        // Detect line break: actual newline OR JSON-escaped two-char sequence
+        bool isNewline = (*p == '\n') || (*p == '\\' && *(p + 1) == 'n');
+        if (isNewline) {
+            lineBuf[lineBufLen] = '\0';
+            strncpy(lines[lineCount], lineBuf, TOTAL_WIDTH);
+            lines[lineCount][TOTAL_WIDTH] = '\0';
+            lineCount++;
+            lineBufLen = 0;
+            p += (*p == '\\') ? 2 : 1;
+            continue;
+        }
+
+        lineBuf[lineBufLen++] = *p++;
+
+        if (lineBufLen >= maxChars) {
+            // Try to wrap at the last space in the second half of the buffer
+            int splitAt = lineBufLen;
+            for (int i = lineBufLen - 1; i > lineBufLen / 2; i--) {
+                if (lineBuf[i] == ' ') { splitAt = i; break; }
+            }
+
+            if (splitAt < lineBufLen) {
+                // Wrap at space
+                lineBuf[splitAt] = '\0';
+                strncpy(lines[lineCount], lineBuf, TOTAL_WIDTH);
+                lines[lineCount][TOTAL_WIDTH] = '\0';
+                lineCount++;
+                int remainLen = lineBufLen - splitAt - 1;
+                memmove(lineBuf, lineBuf + splitAt + 1, remainLen);
+                lineBufLen = remainLen;
+            } else {
+                // No space found — hard-cut
+                lineBuf[lineBufLen] = '\0';
+                strncpy(lines[lineCount], lineBuf, TOTAL_WIDTH);
+                lines[lineCount][TOTAL_WIDTH] = '\0';
+                lineCount++;
+                lineBufLen = 0;
+            }
+        }
+    }
+
+    // Flush any remaining text as the final line
+    if (lineBufLen > 0 && lineCount < maxLines) {
+        lineBuf[lineBufLen] = '\0';
+        strncpy(lines[lineCount], lineBuf, TOTAL_WIDTH);
+        lines[lineCount][TOTAL_WIDTH] = '\0';
+        lineCount++;
+    }
+
+    return lineCount;
+}
+
+// Scroll all lines upward (bottom → top). duration = number of full scroll loops.
+static void showVerticalScroll(const char *msg, uint16_t color, uint8_t size,
+                                bool rainbow, uint32_t duration) {
+    if (!dma_display || !msg || !*msg) return;
+    if (size < 1) size = 1;
+    if (size > 3) size = 3;
+
+    static char lines[VSCROLL_MAX_LINES][TOTAL_WIDTH + 1];
+    int lineCount = buildWrappedLines(msg, size, lines, VSCROLL_MAX_LINES);
+    if (lineCount == 0) return;
+
+    int ch          = CHAR_H * size;
+    int totalHeight = lineCount * ch;
+    int hueShift    = 0;
+
+    uint32_t loops = (duration == 0) ? 1 : duration;
+    for (uint32_t l = 0; l < loops; l++) {
+        for (int y = PANEL_RES_Y; y >= -totalHeight; y--) {
+            dma_display->fillScreen(0);
+            for (int i = 0; i < lineCount; i++) {
+                int lineY = y + i * ch;
+                if (lineY < -ch || lineY >= PANEL_RES_Y) continue;
+                int lineLen = (int)strlen(lines[i]);
+                int lineW   = lineLen * (CHAR_W * size);
+                int cx      = (TOTAL_WIDTH - lineW) / 2;
+                if (cx < 0) cx = 0;
+                if (rainbow) {
+                    drawRainbowText(lines[i], cx, lineY, size, hueShift);
+                } else {
+                    dma_display->setTextSize(size);
+                    dma_display->setTextWrap(false);
+                    dma_display->setTextColor(color);
+                    dma_display->setCursor(cx, lineY);
+                    dma_display->print(lines[i]);
+                }
+            }
+            if (rainbow) hueShift = (hueShift + 2) % 360;
+            delay(SCROLL_STEP_MS);
+        }
+    }
+}
+
 void showMessage(const char *msg, uint16_t color, uint8_t size) {
     if (!dma_display) return;
     if (size < 1) size = 1;
@@ -252,10 +366,15 @@ void showMessage(const char *msg, uint16_t color, uint8_t size) {
  *  Non-blocking for networking: WiFi/MQTT runs in a separate Core 0 task.
  * ================================================================= */
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t duration) {
+                      bool rainbow, uint32_t duration, bool scrollVertical = false) {
     if (!dma_display || !msg || msg[0] == '\0') return;
     if (size < 1) size = 1;
     if (size > 3) size = 3;
+
+    if (scrollVertical) {
+        showVerticalScroll(msg, color, size, rainbow, duration);
+        return;
+    }
 
     int cw    = CHAR_W * size;
     int ch    = CHAR_H * size;
@@ -820,7 +939,8 @@ void playbackTaskFn(void *) {
         TextNotification pendingNotif;
         if (takePendingTextNotification(&pendingNotif)) {
             showNotification(pendingNotif.text, pendingNotif.color, pendingNotif.size,
-                             pendingNotif.rainbow, pendingNotif.duration);
+                             pendingNotif.rainbow, pendingNotif.duration,
+                             pendingNotif.scrollVertical);
             if (dma_display) dma_display->clearScreen();
             continue;
         }
@@ -834,7 +954,8 @@ void playbackTaskFn(void *) {
                                   dashboardCard.duration);
                 } else {
                     showNotification(dashboardCard.text, dashboardCard.color, dashboardCard.size,
-                                     dashboardCard.rainbow, dashboardCard.duration);
+                                     dashboardCard.rainbow, dashboardCard.duration,
+                                     dashboardCard.scrollVertical);
                 }
                 if (dma_display) dma_display->clearScreen();
                 continue;

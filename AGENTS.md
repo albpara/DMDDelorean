@@ -209,6 +209,7 @@ A `TextNotification` struct (defined in `mqtt.h`) is shared between the MQTT mod
 | `rainbow` | `bool` | Animate each character in a different hue |
 | `duration` | `uint32_t` | For scrolling text: loop count. For non-scrolling text: seconds |
 | `pending` | `volatile bool` | Legacy shared flag field; notifications are now consumed by `playbackTaskFn()` through the FIFO queue helpers |
+| `scrollVertical` | `bool` | When `true`, text is word-wrapped and scrolled upward (bottom → top) instead of horizontally |
 
 Current runtime semantics:
 - Notifications are **queued FIFO**, not replace-latest.
@@ -224,6 +225,16 @@ Current runtime semantics:
 ```
 All fields except `text` are optional and fall back to defaults (`color=#FFFFFF`, `size=1`, no rainbow, `duration=5`).
 
+**Vertical scrolling** — add `"scroll":"vertical"` to the payload:
+```json
+{"text":"Temp: 22C\nHumidity: 60%\nPressure: 1013hPa","scroll":"vertical","color":"#00FF88","size":1,"duration":2}
+```
+- Text is split on `\n` (JSON-escaped or raw) into separate lines.
+- Long lines are automatically word-wrapped to fit the panel width at the chosen font size.
+- `duration` = number of full bottom-to-top scroll loops (default 1).
+- Works with `"effect":"rainbow"` too.
+- Also supported for dashboard cards via `{topic}/dashboard/set`.
+
 **HTTP route:** `POST /notify` exists and uses the same parser as MQTT.
 
 **Important:** the backend supports HTTP notification injection, but the current captive portal HTML does **not** expose a notification form section. Do not assume the web UI contains controls unless `src/components/portal_html.h` has been updated accordingly.
@@ -236,7 +247,7 @@ void showMessage(const char *msg, uint16_t color, uint8_t size = 1);
 **`showNotification` function** (used by `loop()` for MQTT/web notifications):
 ```cpp
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t duration);
+                      bool rainbow, uint32_t duration, bool scrollVertical = false);
 ```
 
 **`applyTextNotification` function** (shared parser — called by both MQTT callback and HTTP handler):
@@ -348,6 +359,22 @@ pio device monitor
 8. **Some docs may lag the code.** In this repo, prefer `src/components/app_config.h`, `src/components/mqtt.cpp`, `src/components/wifi_portal.cpp`, and `src/main.cpp` over README assumptions.
 
 ---
+
+## Recent Firmware Updates (2026-03-25)
+
+13. **Vertical text scrolling:**
+        - `TextNotification` struct gained a new `scrollVertical` (bool) field, initialized to `false` by `resetTextNotification()`.
+        - `applyTextNotification()` parses `"scroll":"vertical"` from the JSON payload and sets the field; copies it when enqueuing.
+        - `applyDashboardPayload()` also parses `"scroll":"vertical"` for individual dashboard cards.
+        - Added `VSCROLL_MAX_LINES` (32) constant, `buildWrappedLines()` helper, and `showVerticalScroll()` function in `src/main.cpp`.
+            - `buildWrappedLines()` splits text on `\n` (actual or JSON-escaped two-char `\n`) and auto-wraps long lines at word boundaries.
+            - `showVerticalScroll()` renders all lines scrolling upward (bottom → top) at `SCROLL_STEP_MS` per pixel step; each line is horizontally centred; supports rainbow effect and loop count via `duration`.
+        - `showNotification()` signature extended with `bool scrollVertical` parameter; dispatches to `showVerticalScroll()` when set.
+        - `playbackTaskFn()` passes `scrollVertical` at both notification and dashboard card call sites.
+        - **MQTT payload example:**
+            ```json
+            {"text":"Temp: 22C\nHumidity: 60%\nPressure: 1013","scroll":"vertical","color":"#00FF88","size":1,"duration":2}
+            ```
 
 ## Recent Firmware Updates (2026-03-24)
 
