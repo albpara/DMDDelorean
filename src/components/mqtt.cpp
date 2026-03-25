@@ -51,6 +51,7 @@ static void resetTextNotification(TextNotification &notif) {
         notif.solar_w  = 0;
         notif.house_w  = 0;
         notif.scrollVertical = false;
+        notif.speed = 0;
 }
 
 static void resetTextNotificationQueue() {
@@ -419,6 +420,9 @@ void applyTextNotification(const char *payload) {
         // scroll direction
         if (s.indexOf("\"scroll\":\"vertical\"") >= 0) nextNotif.scrollVertical = true;
 
+        // scroll speed: "slow" = 2× step delay; "fast" = default
+        if (s.indexOf("\"speed\":\"slow\"") >= 0) nextNotif.speed = 1;
+
         // duration: loops for scrolling text, seconds for non-scrolling text
         int di = s.indexOf("\"duration\":");
         if (di >= 0) nextNotif.duration = (uint32_t)s.substring(di + 11).toInt();
@@ -439,6 +443,7 @@ void applyTextNotification(const char *payload) {
             slot.rainbow = nextNotif.rainbow;
             slot.duration = nextNotif.duration;
             slot.scrollVertical = nextNotif.scrollVertical;
+            slot.speed = nextNotif.speed;
             slot.pending = true;
 
             textNotifTail = (uint8_t)((textNotifTail + 1) % NOTIFY_QUEUE_LEN);
@@ -451,6 +456,7 @@ void applyTextNotification(const char *payload) {
             textNotif.rainbow = nextNotif.rainbow;
             textNotif.duration = nextNotif.duration;
             textNotif.scrollVertical = nextNotif.scrollVertical;
+            textNotif.speed = nextNotif.speed;
             textNotif.pending = true;
             enqueued = true;
         }
@@ -583,6 +589,12 @@ void applyDashboardPayload(const char *payload) {
                     if (jsonExtractQuoted(obj, "scroll", &scroll)) {
                         scroll.toLowerCase();
                         if (scroll == "vertical") card.scrollVertical = true;
+                    }
+
+                    String speedStr;
+                    if (jsonExtractQuoted(obj, "speed", &speedStr)) {
+                        speedStr.toLowerCase();
+                        if (speedStr == "slow") card.speed = 1;
                     }
 
                     int dur = 0;

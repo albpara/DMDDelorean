@@ -366,7 +366,8 @@ void showMessage(const char *msg, uint16_t color, uint8_t size) {
  *  Non-blocking for networking: WiFi/MQTT runs in a separate Core 0 task.
  * ================================================================= */
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t duration, bool scrollVertical = false) {
+                      bool rainbow, uint32_t duration, bool scrollVertical = false,
+                      uint8_t speed = 0) {
     if (!dma_display || !msg || msg[0] == '\0') return;
     if (size < 1) size = 1;
     if (size > 3) size = 3;
@@ -376,9 +377,28 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
         return;
     }
 
+    // Sanitize for horizontal: replace real \n and JSON-escaped \\n with spaces
+    char sanitizedMsg[256];
+    {
+        const char *s = msg;
+        char *d = sanitizedMsg;
+        char *end = sanitizedMsg + sizeof(sanitizedMsg) - 1;
+        while (*s && d < end) {
+            if (*s == '\n') {
+                *d++ = ' '; s++;
+            } else if (*s == '\\' && *(s + 1) == 'n') {
+                *d++ = ' '; s += 2;
+            } else {
+                *d++ = *s++;
+            }
+        }
+        *d = '\0';
+    }
+
+    int stepMs = (speed == 1) ? SCROLL_STEP_MS * 2 : SCROLL_STEP_MS;
     int cw    = CHAR_W * size;
     int ch    = CHAR_H * size;
-    int len   = (int)strlen(msg);
+    int len   = (int)strlen(sanitizedMsg);
     int textW = len * cw;
     int cy    = (PANEL_RES_Y - ch) / 2;
     bool wide = (textW > TOTAL_WIDTH);
@@ -391,38 +411,39 @@ void showNotification(const char *msg, uint16_t color, uint8_t size,
             for (int x = TOTAL_WIDTH; x >= -textW; x--) {
                 dma_display->fillScreen(0);
                 if (rainbow) {
-                    drawRainbowText(msg, x, cy, size, hueShift);
+                    drawRainbowText(sanitizedMsg, x, cy, size, hueShift);
                     hueShift = (hueShift + 8) % 360;
                 } else {
                     dma_display->setTextSize(size);
                     dma_display->setTextWrap(false);
                     dma_display->setTextColor(color);
                     dma_display->setCursor(x, cy);
-                    dma_display->print(msg);
+                    dma_display->print(sanitizedMsg);
                 }
-                delay(SCROLL_STEP_MS);
+                delay(stepMs);
             }
         }
         return;
     }
 
-    // Non-scrolling text: duration is interpreted as seconds.
+    // Non-scrolling text: duration is interpreted as seconds; left-aligned.
+    // Use base refresh rate regardless of speed (speed only applies to scrolling).
     uint32_t seconds = (duration == 0) ? 1 : duration;
     uint32_t durationMs = seconds * 1000UL;
     unsigned long start = millis();
-    int cx = (TOTAL_WIDTH - textW) / 2;
+    int cx = 0;
 
     while (millis() - start < durationMs) {
         dma_display->fillScreen(0);
         if (rainbow) {
-            drawRainbowText(msg, cx, cy, size, hueShift);
+            drawRainbowText(sanitizedMsg, cx, cy, size, hueShift);
             hueShift = (hueShift + 8) % 360;
         } else {
             dma_display->setTextSize(size);
             dma_display->setTextWrap(false);
             dma_display->setTextColor(color);
             dma_display->setCursor(cx, cy);
-            dma_display->print(msg);
+            dma_display->print(sanitizedMsg);
         }
         delay(SCROLL_STEP_MS);
     }
@@ -940,7 +961,7 @@ void playbackTaskFn(void *) {
         if (takePendingTextNotification(&pendingNotif)) {
             showNotification(pendingNotif.text, pendingNotif.color, pendingNotif.size,
                              pendingNotif.rainbow, pendingNotif.duration,
-                             pendingNotif.scrollVertical);
+                             pendingNotif.scrollVertical, pendingNotif.speed);
             if (dma_display) dma_display->clearScreen();
             continue;
         }
@@ -955,7 +976,7 @@ void playbackTaskFn(void *) {
                 } else {
                     showNotification(dashboardCard.text, dashboardCard.color, dashboardCard.size,
                                      dashboardCard.rainbow, dashboardCard.duration,
-                                     dashboardCard.scrollVertical);
+                                     dashboardCard.scrollVertical, dashboardCard.speed);
                 }
                 if (dma_display) dma_display->clearScreen();
                 continue;

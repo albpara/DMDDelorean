@@ -46,6 +46,7 @@ struct TextNotification {
     int32_t  solar_w;         // solar generation in watts  (cardType==1)
     int32_t  house_w;         // house consumption in watts (cardType==1)
     bool     scrollVertical;  // true = scroll lines upward instead of horizontally
+    uint8_t  speed;           // 0=fast (default), 1=slow (2× step delay)
 };
 extern TextNotification textNotif;
 
@@ -55,9 +56,10 @@ class MatrixPanel_I2S_DMA;
 extern MatrixPanel_I2S_DMA *dma_display;
 
 // Parse a JSON or plain-text payload and enqueue it for FIFO display.
-// JSON: {"text":"...","color":"#RRGGBB","size":1,"effect":"rainbow","scroll":"vertical","duration":5}
+// JSON: {"text":"...","color":"#RRGGBB","size":1,"effect":"rainbow","scroll":"vertical","speed":"slow","duration":5}
 // Plain text: entire payload used as message with defaults.
 // For vertical scroll: text may use \n to separate lines; long lines are auto-wrapped.
+// For horizontal scroll: \n is replaced with spaces; speed "slow" doubles the step delay.
 bool hasPendingTextNotification();
 bool takePendingTextNotification(TextNotification *out);
 bool hasDashboardCards();

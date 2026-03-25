@@ -225,6 +225,16 @@ Current runtime semantics:
 ```
 All fields except `text` are optional and fall back to defaults (`color=#FFFFFF`, `size=1`, no rainbow, `duration=5`).
 
+**Horizontal scroll speed** — add `"speed":"slow"` for half-speed scrolling (2× step delay):
+```json
+{"text":"This is a long message that scrolls","speed":"slow","color":"#FFFFFF","duration":2}
+```
+- `"speed":"fast"` (default) uses `SCROLL_STEP_MS` (30 ms/pixel).
+- `"speed":"slow"` doubles the delay to `SCROLL_STEP_MS * 2` (60 ms/pixel).
+- Speed only affects scrolling; static (fits-on-panel) text always uses the base refresh rate.
+- Horizontal text is **left-aligned** (not centered) when it fits on the panel.
+- `\n` (real newline or JSON-escaped `\\n`) in horizontal text is **replaced with a space** — use `"scroll":"vertical"` if multi-line display is needed.
+
 **Vertical scrolling** — add `"scroll":"vertical"` to the payload:
 ```json
 {"text":"Temp: 22C\nHumidity: 60%\nPressure: 1013hPa","scroll":"vertical","color":"#00FF88","size":1,"duration":2}
@@ -247,7 +257,8 @@ void showMessage(const char *msg, uint16_t color, uint8_t size = 1);
 **`showNotification` function** (used by `loop()` for MQTT/web notifications):
 ```cpp
 void showNotification(const char *msg, uint16_t color, uint8_t size,
-                      bool rainbow, uint32_t duration, bool scrollVertical = false);
+                      bool rainbow, uint32_t duration, bool scrollVertical = false,
+                      uint8_t speed = 0);
 ```
 
 **`applyTextNotification` function** (shared parser — called by both MQTT callback and HTTP handler):
@@ -361,6 +372,17 @@ pio device monitor
 ---
 
 ## Recent Firmware Updates (2026-03-25)
+
+14. **Horizontal scroll improvements:**
+        - **`\n` stripping:** `showNotification()` now sanitizes horizontal text before rendering — real `\n` characters and JSON-escaped `\\n` two-char sequences are replaced with spaces so the message flows as a single line. (Vertical scroll still handles `\n` as line breaks unchanged.)
+        - **Scroll speed control:** `TextNotification` struct gained a new `speed` (uint8_t) field (`0`=fast/default, `1`=slow). `applyTextNotification()` parses `"speed":"slow"` and `applyDashboardPayload()` also parses it for individual dashboard cards. `showNotification()` signature extended with `uint8_t speed = 0`; when `speed == 1` the scroll step delay is doubled (`SCROLL_STEP_MS * 2`). Speed only affects scrolling text; static (fits-on-panel) text always uses the base `SCROLL_STEP_MS` refresh rate.
+        - **Left-aligned static text:** Non-scrolling horizontal text is now left-aligned (`cx = 0`) instead of centered.
+        - `playbackTaskFn()` passes `speed` at both notification and dashboard card call sites.
+        - **MQTT payload examples:**
+            ```json
+            {"text":"Fast scrolling message","speed":"fast","duration":2}
+            {"text":"Slow scrolling message","speed":"slow","color":"#FFAA00","duration":3}
+            ```
 
 13. **Vertical text scrolling:**
         - `TextNotification` struct gained a new `scrollVertical` (bool) field, initialized to `false` by `resetTextNotification()`.
