@@ -29,6 +29,24 @@ If behavior changes and this file is not updated, future agents will make wrong 
 
 ---
 
+## Git Workflow Rule (Mandatory)
+
+- Start **every coding session** by creating a dedicated branch from `main`.
+- Branch naming should be descriptive, for example: `feat/<topic>`, `fix/<topic>`, `chore/<topic>`.
+- **Never push directly to `main`.**
+- All changes must be pushed to the session branch and integrated via Pull Request.
+- Tags/releases should be created from the merged release commit, not from unmerged local work.
+
+Example flow:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b chore/update-docs
+```
+
+---
+
 ## Architecture
 
 | Layer | Description |

@@ -124,6 +124,53 @@ You'll see boot messages, SD card status, buffer allocation results, and the nam
 
 ---
 
+## Release Procedure
+
+Use this workflow for every new firmware release.
+
+1. Create a release branch (never push directly to `main`):
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b release/v0.2.0
+```
+
+2. Apply and validate changes:
+
+```bash
+pio run
+```
+
+3. Commit and push the release branch:
+
+```bash
+git add -A
+git commit -m "Release v0.2.0"
+git push -u origin release/v0.2.0
+```
+
+4. Open a Pull Request and merge into `main`.
+
+5. Create and push the annotated tag from the merged release commit:
+
+```bash
+git checkout main
+git pull origin main
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
+```
+
+6. Publish a GitHub Release for that tag:
+- GitHub UI: Releases -> Draft a new release -> select `v0.2.0` -> publish.
+- GitHub CLI (optional):
+
+```bash
+gh release create v0.2.0 --title "v0.2.0" --notes "Release notes here"
+```
+
+---
+
 ## Configuration
 
 All tunable parameters are `#define` constants at the top of `src/main.cpp`:
