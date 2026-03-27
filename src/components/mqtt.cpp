@@ -934,6 +934,27 @@ void mqttPublishDiscovery() {
         "}"
         "}";
     mqttClient.publish(logFwdDiscTopic.c_str(), logFwdPayload.c_str(), true);
+
+    // Sensor entity: state_topic = {topic}/log so each log line appears in HA logbook
+    String logSensorDiscTopic = "homeassistant/sensor/" + mqttClientId + "_log/config";
+    String logSensorPayload = "{\"name\":\"Log\""
+        ",\"unique_id\":\"" + mqttClientId + "_log\""
+        ",\"object_id\":\"" + mqttClientId + "_log\""
+        ",\"state_topic\":\"" + mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "\""
+        ",\"entity_category\":\"diagnostic\""
+        ",\"icon\":\"mdi:math-log\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(logSensorDiscTopic.c_str(), logSensorPayload.c_str(), true);
 }
 
 /* =================================================================
