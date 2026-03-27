@@ -5,6 +5,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include "app_config.h"
+#include "mqtt_logger.h"
 
 /* Shared MQTT state */
 extern WiFiClient   mqttWifi;
@@ -85,3 +86,8 @@ void mqttConnect();
 void loadMqttConfig();
 void mqttSetup();
 void mqttLoop();
+
+/* MQTT log forwarding — publish serial log lines to {topic}/log */
+extern bool mqttLogForwardingEnabled;
+void mqttPublishLog(const char *line);
+void applyMqttLogForwarding(bool en);
