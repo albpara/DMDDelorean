@@ -23,17 +23,17 @@ static String wifiSavedSSID;
 static String wifiSavedPass;
 
 static void startAccessPointPortal() {
-    Serial.println("[WIFI] Starting AP: " AP_SSID);
+    LOGGER.println("[WIFI] Starting AP: " AP_SSID);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID);
     delay(100);
-    Serial.printf("[WIFI] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+    LOGGER.printf("[WIFI] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
 
     dnsServer.start(53, "*", WiFi.softAPIP());
     apMode = true;
     wifiStaConnecting = false;
     wifiIpShown = false;
-    Serial.println("[WIFI] Captive portal ready");
+    LOGGER.println("[WIFI] Captive portal ready");
 }
 
 static void startSavedCredentialAttempt() {
@@ -46,7 +46,7 @@ static void startSavedCredentialAttempt() {
     wifiStaStartedAt = millis();
     wifiNextRetryAt = 0;
 
-    Serial.printf("[WIFI] Saved-credential attempt %u/%u: '%s'\n",
+    LOGGER.printf("[WIFI] Saved-credential attempt %u/%u: '%s'\n",
                   wifiSavedRetryAttempt,
                   (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES,
                   wifiSavedSSID.c_str());
@@ -62,7 +62,7 @@ void serviceWeb() {
         apMode = false;
         wifiConnectedAt = millis();
         String ip = WiFi.localIP().toString();
-        Serial.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
+        LOGGER.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
         if (!wifiIpShown) {
             showMessage(ip.c_str(), dma_display->color565(0, 200, 200));
             wifiIpShown = true;
@@ -70,7 +70,7 @@ void serviceWeb() {
         dnsServer.stop();
         WiFi.mode(WIFI_STA);
     } else if (wifiStaConnecting && (millis() - wifiStaStartedAt) >= WIFI_CONNECT_TIMEOUT) {
-        Serial.printf("[WIFI] Saved credentials failed (attempt %u/%u)\n",
+        LOGGER.printf("[WIFI] Saved credentials failed (attempt %u/%u)\n",
                       wifiSavedRetryAttempt,
                       (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES);
         wifiStaConnecting = false;
@@ -79,11 +79,11 @@ void serviceWeb() {
         if (wifiSavedRetryEnabled && wifiSavedRetryAttempt < WIFI_BOOT_CONNECT_MAX_RETRIES) {
             if (!apMode) startAccessPointPortal();
             wifiNextRetryAt = millis() + WIFI_BOOT_RETRY_INTERVAL;
-            Serial.printf("[WIFI] Retrying in background in %u ms\n", (unsigned)WIFI_BOOT_RETRY_INTERVAL);
+            LOGGER.printf("[WIFI] Retrying in background in %u ms\n", (unsigned)WIFI_BOOT_RETRY_INTERVAL);
         } else {
             wifiSavedRetryEnabled = false;
             if (!apMode) startAccessPointPortal();
-            Serial.println("[WIFI] Max retry attempts reached, staying in AP mode");
+            LOGGER.println("[WIFI] Max retry attempts reached, staying in AP mode");
         }
     } else if (!wifiStaConnecting && wifiSavedRetryEnabled && wifiNextRetryAt != 0 &&
                (long)(millis() - wifiNextRetryAt) >= 0) {
@@ -136,7 +136,7 @@ static void handleConnect() {
         return;
     }
 
-    Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
+    LOGGER.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
 
     wifiSavedRetryEnabled = false;
     wifiStaConnecting = false;
@@ -158,7 +158,7 @@ static void handleConnect() {
         prefs.end();
 
         String ip = WiFi.localIP().toString();
-        Serial.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
+        LOGGER.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
         showMessage(ip.c_str(), dma_display->color565(0, 200, 200));
         wifiIpShown = true;
         wifiStaConnecting = false;
@@ -171,11 +171,11 @@ static void handleConnect() {
         WiFi.mode(WIFI_STA);
         apMode = false;
         wifiConnectedAt = millis();
-        Serial.println("[WIFI] Switched to STA mode");
+        LOGGER.println("[WIFI] Switched to STA mode");
     } else {
         WiFi.disconnect();
         WiFi.mode(apMode ? WIFI_AP : WIFI_STA);
-        Serial.println("[WIFI] Connection failed");
+        LOGGER.println("[WIFI] Connection failed");
         webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"Connection failed. Check credentials.\"}");
     }
 }
@@ -218,6 +218,8 @@ static void handleStatus() {
     json += MAX_BRIGHTNESS_VAL;
     json += ",\"safe_brightness\":";
     json += safeBrightness ? "true" : "false";
+    json += ",\"log_fwd\":";
+    json += mqttLogForwardingEnabled ? "true" : "false";
 
     // Clock mode state
     json += ",\"clock\":{\"enabled\":";
@@ -272,7 +274,7 @@ static void handleMqttSave() {
     String msg = mqttEnabled ? "Saved. Connecting..." : "MQTT disabled (no server)";
     webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"" + msg + "\"}");
 
-    Serial.printf("[MQTT] Config saved: %s:%d client=%s topic=%s\n",
+    LOGGER.printf("[MQTT] Config saved: %s:%d client=%s topic=%s\n",
                   server.c_str(), port, client.c_str(), topic.c_str());
 }
 
@@ -358,10 +360,10 @@ static void handleOtaFinal() {
     if (Update.hasError()) {
         String err = "OTA failed: ";
         err += Update.errorString();
-        Serial.println("[OTA] " + err);
+        LOGGER.println("[OTA] " + err);
         webServer.send(500, "application/json", "{\"ok\":false,\"msg\":\"" + err + "\"}");
     } else {
-        Serial.println("[OTA] Update successful — rebooting");
+        LOGGER.println("[OTA] Update successful — rebooting");
         webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"Update successful. Rebooting...\"}");
         delay(500);
         ESP.restart();
@@ -373,21 +375,21 @@ static void handleOtaUpload() {
     HTTPUpload &upload = webServer.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
-        Serial.printf("[OTA] Starting update: %s (%u bytes)\n",
+        LOGGER.printf("[OTA] Starting update: %s (%u bytes)\n",
                       upload.filename.c_str(), upload.totalSize);
         showMessage("OTA...", dma_display->color565(255, 200, 0));
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-            Serial.printf("[OTA] begin() error: %s\n", Update.errorString());
+            LOGGER.printf("[OTA] begin() error: %s\n", Update.errorString());
         }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            Serial.printf("[OTA] write() error: %s\n", Update.errorString());
+            LOGGER.printf("[OTA] write() error: %s\n", Update.errorString());
         }
     } else if (upload.status == UPLOAD_FILE_END) {
         if (Update.end(true)) {
-            Serial.printf("[OTA] Upload complete: %u bytes\n", upload.totalSize);
+            LOGGER.printf("[OTA] Upload complete: %u bytes\n", upload.totalSize);
         } else {
-            Serial.printf("[OTA] end() error: %s\n", Update.errorString());
+            LOGGER.printf("[OTA] end() error: %s\n", Update.errorString());
         }
     }
 }
@@ -398,6 +400,13 @@ static void handleNotFound() {
     } else {
         webServer.send(404, "text/plain", "Not found");
     }
+}
+
+static void handleLogForwarding() {
+    bool en = webServer.arg("enabled") == "1";
+    applyMqttLogForwarding(en);
+    String msg = en ? "Log forwarding enabled" : "Log forwarding disabled";
+    webServer.send(200, "application/json", "{\"ok\":true,\"msg\":\"" + msg + "\"}");
 }
 
 /* =================================================================
@@ -413,6 +422,7 @@ void wifiSetup() {
     webServer.on("/panel", HTTP_POST, handlePanel);
     webServer.on("/clock", HTTP_POST, handleClockSave);
     webServer.on("/notify", HTTP_POST, handleNotify);
+    webServer.on("/log", HTTP_POST, handleLogForwarding);
     webServer.on("/update", HTTP_POST, handleOtaFinal, handleOtaUpload);
     webServer.on("/generate_204", HTTP_GET, handleCaptiveRedirect);
     webServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect);
@@ -436,8 +446,8 @@ void wifiSetup() {
         wifiNextRetryAt = 0;
         apMode = false;
         wifiIpShown = false;
-        Serial.printf("[WIFI] Saved credentials found for '%s'\n", savedSSID.c_str());
-        Serial.printf("[WIFI] Background retry enabled (max %u attempts)\n",
+        LOGGER.printf("[WIFI] Saved credentials found for '%s'\n", savedSSID.c_str());
+        LOGGER.printf("[WIFI] Background retry enabled (max %u attempts)\n",
                       (unsigned)WIFI_BOOT_CONNECT_MAX_RETRIES);
         startSavedCredentialAttempt();
         webServer.begin();

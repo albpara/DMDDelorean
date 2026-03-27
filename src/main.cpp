@@ -85,26 +85,26 @@ static bool loadGifIndex(size_t listaSize) {
     PlaylistIndexHeader hdr;
     if (idx.read((uint8_t *)&hdr, sizeof(hdr)) != (int)sizeof(hdr)) {
         idx.close();
-        Serial.println("[IDX] Header read failed");
+        LOGGER.println("[IDX] Header read failed");
         return false;
     }
 
     if (hdr.magic != LISTA_INDEX_MAGIC || hdr.version != LISTA_INDEX_VERSION) {
         idx.close();
-        Serial.println("[IDX] Header mismatch");
+        LOGGER.println("[IDX] Header mismatch");
         return false;
     }
 
     if (hdr.listaSize != (uint32_t)listaSize || hdr.count == 0) {
         idx.close();
-        Serial.println("[IDX] Cache metadata mismatch");
+        LOGGER.println("[IDX] Cache metadata mismatch");
         return false;
     }
 
     size_t expectedSize = sizeof(PlaylistIndexHeader) + ((size_t)hdr.count * sizeof(uint32_t));
     if ((size_t)idx.size() != expectedSize) {
         idx.close();
-        Serial.println("[IDX] Cache size mismatch");
+        LOGGER.println("[IDX] Cache size mismatch");
         return false;
     }
 
@@ -117,7 +117,7 @@ static bool loadGifIndex(size_t listaSize) {
     gifOffsets = (uint32_t *)(psramFound() ? ps_malloc(allocSz) : malloc(allocSz));
     if (!gifOffsets) {
         idx.close();
-        Serial.printf("[IDX] Failed to alloc %u B for cache\n", allocSz);
+        LOGGER.printf("[IDX] Failed to alloc %u B for cache\n", allocSz);
         return false;
     }
 
@@ -125,13 +125,13 @@ static bool loadGifIndex(size_t listaSize) {
         idx.close();
         free(gifOffsets);
         gifOffsets = nullptr;
-        Serial.println("[IDX] Offset read failed");
+        LOGGER.println("[IDX] Offset read failed");
         return false;
     }
 
     idx.close();
     gifCount = (int)hdr.count;
-    Serial.printf("[IDX] Loaded %d offsets from %s\n", gifCount, LISTA_INDEX_PATH);
+    LOGGER.printf("[IDX] Loaded %d offsets from %s\n", gifCount, LISTA_INDEX_PATH);
     return true;
 }
 
@@ -144,7 +144,7 @@ static bool saveGifIndex(size_t listaSize, int count) {
 
     File idx = SD.open(LISTA_INDEX_PATH, FILE_WRITE);
     if (!idx) {
-        Serial.println("[IDX] Failed to open cache for write");
+        LOGGER.println("[IDX] Failed to open cache for write");
         return false;
     }
 
@@ -161,12 +161,12 @@ static bool saveGifIndex(size_t listaSize, int count) {
     idx.close();
 
     if (!ok) {
-        Serial.println("[IDX] Failed to write full cache");
+        LOGGER.println("[IDX] Failed to write full cache");
         SD.remove(LISTA_INDEX_PATH);
         return false;
     }
 
-    Serial.printf("[IDX] Saved %d offsets to %s\n", count, LISTA_INDEX_PATH);
+    LOGGER.printf("[IDX] Saved %d offsets to %s\n", count, LISTA_INDEX_PATH);
     return true;
 }
 
@@ -567,7 +567,7 @@ static void ensureNtpSync() {
         configTzTime(clockTz, "pool.ntp.org", "time.nist.gov", "time.google.com");
         ntpConfigured = true;
         ntpLastAttempt = nowMs;
-        Serial.printf("[CLOCK] NTP config requested (TZ=%s)\n", clockTz);
+        LOGGER.printf("[CLOCK] NTP config requested (TZ=%s)\n", clockTz);
     }
 
     clockTimeValid = haveSyncedTime();
@@ -738,9 +738,9 @@ static void logGifPlaybackStart(int idx) {
     }
 
     if (havePath) {
-        Serial.printf("[PLAY] GIF idx=%d path=%s\n", idx, path);
+        LOGGER.printf("[PLAY] GIF idx=%d path=%s\n", idx, path);
     } else {
-        Serial.printf("[PLAY] GIF idx=%d\n", idx);
+        LOGGER.printf("[PLAY] GIF idx=%d\n", idx);
     }
 }
 
@@ -749,15 +749,15 @@ static void logGifPlaybackStart(int idx) {
  *  Uses a stack buffer to avoid heap-fragmenting String allocations.
  * ================================================================= */
 bool loadGifList() {
-    Serial.println("[..] Opening " LISTA_PATH);
+    LOGGER.println("[..] Opening " LISTA_PATH);
     File f = SD.open(LISTA_PATH, FILE_READ);
     if (!f) {
-        Serial.println("[ERR] Cannot open " LISTA_PATH);
+        LOGGER.println("[ERR] Cannot open " LISTA_PATH);
         return false;
     }
 
     size_t fsize = f.size();
-    Serial.printf("[..] File opened, size=%u\n", fsize);
+    LOGGER.printf("[..] File opened, size=%u\n", fsize);
 
     if (loadGifIndex(fsize)) {
         f.close();
@@ -765,9 +765,9 @@ bool loadGifList() {
     }
 
     if (SD.exists(LISTA_INDEX_PATH)) {
-        Serial.println("[IDX] Cache invalid or unreadable; rebuilding");
+        LOGGER.println("[IDX] Cache invalid or unreadable; rebuilding");
     } else {
-        Serial.println("[IDX] Cache missing; building from lista.txt");
+        LOGGER.println("[IDX] Cache missing; building from lista.txt");
     }
 
     // --- Pass 1: count valid lines ---
@@ -787,7 +787,7 @@ bool loadGifList() {
         while (e > s && buf[e - 1] == ' ') e--;
         if (e > s && buf[s] != '#') count++;
     }
-    Serial.printf("[..] Counted %d valid lines\n", count);
+    LOGGER.printf("[..] Counted %d valid lines\n", count);
     if (count == 0) { f.close(); return false; }
 
     // --- Allocate offset array (PSRAM preferred, single allocation) ---
@@ -795,11 +795,11 @@ bool loadGifList() {
     size_t allocSz = (size_t)count * sizeof(uint32_t);
     gifOffsets = (uint32_t *)(psramFound() ? ps_malloc(allocSz) : malloc(allocSz));
     if (!gifOffsets) {
-        Serial.printf("[ERR] Failed to alloc %u B for offset table\n", allocSz);
+        LOGGER.printf("[ERR] Failed to alloc %u B for offset table\n", allocSz);
         f.close();
         return false;
     }
-    Serial.printf("[..] Allocated %u B for %d offsets (%s)\n",
+    LOGGER.printf("[..] Allocated %u B for %d offsets (%s)\n",
                   allocSz, count, psramFound() ? "PSRAM" : "heap");
 
     // --- Pass 2: store byte offsets ---
@@ -823,9 +823,9 @@ bool loadGifList() {
     f.close();
 
     gifCount = idx;
-    Serial.printf("[OK] Indexed %d GIF path(s) from lista.txt\n", gifCount);
+    LOGGER.printf("[OK] Indexed %d GIF path(s) from lista.txt\n", gifCount);
     if (!saveGifIndex(fsize, gifCount)) {
-        Serial.println("[IDX] Warning: cache save failed");
+        LOGGER.println("[IDX] Warning: cache save failed");
     }
     return gifCount > 0;
 }
@@ -841,13 +841,13 @@ bool loadIntoBuffer(int bi, int fi) {
 
     File f = SD.open(path);
     if (!f) {
-        Serial.printf("[ERR] open failed: %s\n", path);
+        LOGGER.printf("[ERR] open failed: %s\n", path);
         return false;
     }
 
     size_t sz = f.size();
     if (sz > gifBufCap[bi]) {
-        Serial.printf("[ERR] Too large (%u B, cap %u): %s\n", sz, gifBufCap[bi], path);
+        LOGGER.printf("[ERR] Too large (%u B, cap %u): %s\n", sz, gifBufCap[bi], path);
         f.close();
         return false;
     }
@@ -858,7 +858,7 @@ bool loadIntoBuffer(int bi, int fi) {
     gifBufLen[bi] = rd;
     gifBufOk[bi]  = (rd == sz);
     if (gifBufOk[bi])
-        Serial.printf("[BUF%d] Loaded %s (%u B)\n", bi, path, sz);
+        LOGGER.printf("[BUF%d] Loaded %s (%u B)\n", bi, path, sz);
     return gifBufOk[bi];
 }
 
@@ -900,7 +900,7 @@ void playFromBuffer(int bi) {
         gif.close();
         clearBeforeNextGifDraw = false;
     } else {
-        Serial.printf("[ERR] Decode failed (buf %d)\n", bi);
+        LOGGER.printf("[ERR] Decode failed (buf %d)\n", bi);
         clearBeforeNextGifDraw = false;
     }
 }
@@ -928,7 +928,7 @@ void playFromFile(int fi) {
             gif.close();
             clearBeforeNextGifDraw = false;
         } else {
-            Serial.printf("[ERR] Cannot open: %s\n", path);
+            LOGGER.printf("[ERR] Cannot open: %s\n", path);
             clearBeforeNextGifDraw = false;
         }
         xSemaphoreGive(sdMutex);
@@ -1048,9 +1048,9 @@ void playbackTaskFn(void *) {
 void setup() {
     Serial.begin(115200);
     delay(300);
-    Serial.println("\n================================");
-    Serial.println("  DeLorean DMD  128x32");
-    Serial.println("================================");
+    LOGGER.println("\n================================");
+    LOGGER.println("  DeLorean DMD  128x32");
+    LOGGER.println("================================");
 
     /* ── 1. HUB75 panel init (first, so we can show errors) ── */
     HUB75_I2S_CFG::i2s_pins pins = {
@@ -1068,28 +1068,28 @@ void setup() {
     cfg.min_refresh_rate = MIN_REFRESH_HZ;
     cfg.double_buff      = false;
 
-    Serial.printf("[..] Creating display %dx%d (chain=%d)...\n",
+    LOGGER.printf("[..] Creating display %dx%d (chain=%d)...\n",
                   PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN);
-    Serial.printf("[..] Free heap before display: %u\n", ESP.getFreeHeap());
+    LOGGER.printf("[..] Free heap before display: %u\n", ESP.getFreeHeap());
 
     dma_display = new MatrixPanel_I2S_DMA(cfg);
     if (!dma_display) {
-        Serial.println("[FATAL] Display allocation failed");
+        LOGGER.println("[FATAL] Display allocation failed");
         while (true) delay(1000);
     }
 
     if (!dma_display->begin()) {
-        Serial.println("[FATAL] Display init failed");
+        LOGGER.println("[FATAL] Display init failed");
         while (true) delay(1000);
     }
     dma_display->setBrightness8(min((uint8_t)DEFAULT_BRIGHTNESS, (uint8_t)MAX_BRIGHTNESS));
     dma_display->clearScreen();
-    Serial.printf("[OK] Display %dx%d initialised\n", TOTAL_WIDTH, PANEL_RES_Y);
+    LOGGER.printf("[OK] Display %dx%d initialised\n", TOTAL_WIDTH, PANEL_RES_Y);
 
     /* ── 2. SD Card ────────────────────────────────────────── */
     SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
     if (!SD.begin(SD_CS)) {
-        Serial.println("[FATAL] SD mount failed");
+        LOGGER.println("[FATAL] SD mount failed");
         showMessage("SD FAIL", dma_display->color565(255, 0, 0));
         while (true) {
             dma_display->setBrightness8(min((uint8_t)DEFAULT_BRIGHTNESS, (uint8_t)MAX_BRIGHTNESS));
@@ -1098,16 +1098,16 @@ void setup() {
             delay(500);
         }
     }
-    Serial.println("[OK] SD mounted");
+    LOGGER.println("[OK] SD mounted");
 
     /* ── 3. Mutex ──────────────────────────────────────────── */
     sdMutex = xSemaphoreCreateMutex();
-    Serial.println("[OK] Mutex created");
+    LOGGER.println("[OK] Mutex created");
 
     /* ── 4. Load playlist ──────────────────────────────────── */
-    Serial.println("[..] Loading playlist...");
+    LOGGER.println("[..] Loading playlist...");
     if (!loadGifList()) {
-        Serial.println("[FATAL] No GIFs in " LISTA_PATH);
+        LOGGER.println("[FATAL] No GIFs in " LISTA_PATH);
         showMessage("NO GIFs", dma_display->color565(255, 80, 0));
         while (true) {
             dma_display->setBrightness8(min((uint8_t)DEFAULT_BRIGHTNESS, (uint8_t)MAX_BRIGHTNESS));
@@ -1119,20 +1119,20 @@ void setup() {
 
     /* ── 5. AnimatedGIF decoder ────────────────────────────── */
     gif.begin(LITTLE_ENDIAN_PIXELS);
-    Serial.println("[OK] AnimatedGIF ready");
+    LOGGER.println("[OK] AnimatedGIF ready");
 
     /* ── 6. WiFi / Captive Portal ──────────────────────────── */
     // wifiSetup() and mqttSetup() run on Core 0 inside networkTaskFn
 
     /* ── 7. Allocate PSRAM ping-pong buffers ───────────────── */
-    Serial.printf("[..] PSRAM found: %s\n", psramFound() ? "YES" : "NO");
+    LOGGER.printf("[..] PSRAM found: %s\n", psramFound() ? "YES" : "NO");
     if (psramFound()) {
         gifBuf[0] = (uint8_t *)ps_malloc(MAX_GIF_SIZE);
         gifBuf[1] = (uint8_t *)ps_malloc(MAX_GIF_SIZE);
         hasDualBuf = (gifBuf[0] != nullptr && gifBuf[1] != nullptr);
         if (hasDualBuf) {
             gifBufCap[0] = gifBufCap[1] = MAX_GIF_SIZE;
-            Serial.printf("[OK] PSRAM double-buffer: 2 x %u KB\n",
+            LOGGER.printf("[OK] PSRAM double-buffer: 2 x %u KB\n",
                           MAX_GIF_SIZE / 1024);
         }
     }
@@ -1140,7 +1140,7 @@ void setup() {
     if (!hasDualBuf) {
         // Without PSRAM, heap is too limited for dual buffers + DMA display +
         // AnimatedGIF decoder (~22.5 KB).  Use file-based fallback instead.
-        Serial.println("[WARN] No PSRAM — file-based fallback");
+        LOGGER.println("[WARN] No PSRAM — file-based fallback");
     }
 
     /* ── 8. Initial GIF load & preload task ───────────────── */
@@ -1153,20 +1153,20 @@ void setup() {
 
         xTaskCreatePinnedToCore(
             preloadTaskFn, "Preload", 4096, nullptr, 1, &preloadHandle, 0);
-        Serial.println("[OK] Preload task started on Core 0");
+        LOGGER.println("[OK] Preload task started on Core 0");
     }
 
     // Network stack (WiFi + MQTT + portal) on Core 0
     xTaskCreatePinnedToCore(
         networkTaskFn, "Net", 6144, nullptr, 2, &netTaskHandle, 0);
-    Serial.println("[OK] Network task started on Core 0");
+    LOGGER.println("[OK] Network task started on Core 0");
 
     // GIF playback scheduler on Core 1
     xTaskCreatePinnedToCore(
         playbackTaskFn, "Playback", 6144, nullptr, 1, &playbackHandle, 1);
-    Serial.println("[OK] Playback task started on Core 1");
+    LOGGER.println("[OK] Playback task started on Core 1");
 
-    Serial.println("[OK] Setup complete — starting playback\n");
+    LOGGER.println("[OK] Setup complete — starting playback\n");
 }
 
 /* =================================================================

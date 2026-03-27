@@ -98,6 +98,8 @@
 #define MQTT_DEFAULT_CLIENT  "delorean-dmd"
 #define MQTT_DEFAULT_TOPIC   "delorean-dmd"
 #define MQTT_RETRY_INTERVAL  15000  // ms between reconnect attempts
+#define MQTT_LOG_TOPIC_SUFFIX        "log"   // {topic}/log  — published log lines
+#define DEFAULT_MQTT_LOG_FORWARDING  false   // log forwarding disabled by default
 
 /* =================================================================
  *  WiFi / Captive Portal CONFIGURATION

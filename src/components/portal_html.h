@@ -113,6 +113,10 @@ button:active{top:6px;box-shadow:0 0 #cc9900}
 <label for="mt">Topic</label>
 <input id="mt" placeholder="delorean-dmd">
 <button onclick="mqttSave()">Save MQTT</button>
+<div class="row">
+<label>Log forwarding</label>
+<label class="tgl"><input type="checkbox" id="mlog" onchange="logFwdCtl()"><span class="sl"></span></label>
+</div>
 <div id="mst" class="msg"></div>
 </div>
 </details>
@@ -185,6 +189,11 @@ fetch('/mqtt',{method:'POST',headers:{'Content-Type':'application/x-www-form-url
 M.className='msg '+(d.ok?'ok':'err');M.textContent=d.msg;
 }).catch(()=>{M.className='msg err';M.textContent='Request failed';});}
 
+function logFwdCtl(){var en=document.getElementById('mlog').checked?1:0;
+fetch('/log',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'enabled='+en})
+.then(r=>r.json()).then(d=>{M.className='msg '+(d.ok?'ok':'err');M.textContent=d.msg||'';
+}).catch(()=>{M.className='msg err';M.textContent='Request failed';});}
+
 function panelCtl(){
 var on=document.getElementById('pon').checked?1:0,br=document.getElementById('pbr').value,safe=document.getElementById('psafe').checked?1:0;
 fetch('/panel',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
@@ -226,6 +235,7 @@ document.getElementById('mp').value=m.port||1883;document.getElementById('mu').v
 document.getElementById('mc').value=m.client||'';document.getElementById('mt').value=m.topic||'';
 if(m.connected){M.innerHTML='<span class="ok">MQTT connected</span>';document.getElementById('mbadge').classList.add('on');}
 else if(m.server)M.innerHTML='<span class="err">MQTT not connected</span>';}
+if(d.log_fwd!==undefined)document.getElementById('mlog').checked=d.log_fwd;
 document.getElementById('pon').checked=d.panel_on;
 document.getElementById('pbr').value=d.brightness;document.getElementById('bv').textContent=d.brightness;
 if(d.safe_brightness!==undefined)document.getElementById('psafe').checked=d.safe_brightness;

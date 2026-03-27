@@ -83,6 +83,7 @@ git checkout -b chore/update-docs
 | `src/components/app_config.h` | Centralized project constants (pins, playback, MQTT, WiFi, timing defaults) |
 | `src/components/mqtt.h` | Shared runtime state structures and interfaces used by MQTT, portal, and playback |
 | `src/components/mqtt.cpp` | MQTT config, Home Assistant discovery, notification queue, panel state, clock config persistence |
+| `src/components/mqtt_logger.h` | `MqttLogger` class (tees `Serial` + MQTT); global `LOGGER` used everywhere instead of `Serial` for log output |
 | `src/components/wifi_portal.h` | Web portal / DNS service declarations |
 | `src/components/wifi_portal.cpp` | Captive portal routes, WiFi credential handling, HTTP API, MQTT servicing |
 | `src/components/portal_html.h` | Inline captive portal HTML/JS payload served at `/` |
@@ -278,12 +279,14 @@ The firmware currently publishes Home Assistant discovery for:
 - dashboard dwell number (`{topic}/dashboard/dwell/set`, `{topic}/dashboard/state`)
 - dashboard profile select (`{topic}/dashboard/profile/set`, `{topic}/dashboard/state`)
 - **safe brightness switch** (`{topic}/brightness/safe/set`, `{topic}/brightness/safe/state`) — `entity_category: config`
+- **log forwarding switch** (`{topic}/log/set`, `{topic}/log/state`) — `entity_category: diagnostic`
 
 Other important MQTT topics:
 - brightness set topic: `{topic}/brightness/set`
 - notification topic: `{topic}/notify`
 - dashboard card list topic: `{topic}/dashboard/set`
 - availability topic: `{topic}/available`
+- log output topic: `{topic}/log` (published when log forwarding is enabled)
 
 ### Safe Brightness (power-protection cap)
 
@@ -338,6 +341,7 @@ Routes currently registered by `wifiSetup()`:
 - `POST /panel`
 - `POST /clock`
 - `POST /notify`
+- `POST /log` (toggle MQTT log forwarding — `enabled=0|1`)
 - `POST /update` (OTA firmware upload — multipart/form-data, field `firmware`, binary `.bin`; device reboots on success)
 - captive-portal redirects for common OS probe URLs
 
@@ -370,6 +374,23 @@ pio device monitor
 8. **Some docs may lag the code.** In this repo, prefer `src/components/app_config.h`, `src/components/mqtt.cpp`, `src/components/wifi_portal.cpp`, and `src/main.cpp` over README assumptions.
 
 ---
+
+## Recent Firmware Updates (2026-03-27)
+
+15. **MQTT log forwarding:**
+        - All `Serial.printf/println` log calls in `main.cpp`, `mqtt.cpp`, and `wifi_portal.cpp` now go through a global `LOGGER` object (`MqttLogger` class in `src/components/mqtt_logger.h`) instead of calling `Serial` directly.
+        - `MqttLogger` extends `Print`, wraps the hardware `Serial`, and buffers characters per-line. When `mqttLogForwardingEnabled` is `true` and MQTT is connected, each completed log line is published to `{topic}/log` (non-retained, QoS 0).
+        - A re-entrancy guard (`_guard` bool) prevents recursive MQTT publishes (i.e., the act of publishing a log line will not itself trigger another publish).
+        - `mqttLogForwardingEnabled` (bool, default `false`) persists in NVS namespace `mqtt`, key `log_fwd`.
+        - `applyMqttLogForwarding(bool en)` — set + persist + publish new `{topic}/log/state`.
+        - `mqttPublishLog(const char* line)` — publish a single stripped log line to `{topic}/log`.
+        - **HA discovery:** new `switch` entity (`entity_category: diagnostic`, icon `mdi:math-log`) subscribes to `{topic}/log/set` and publishes state to `{topic}/log/state`.
+        - **HTTP route:** `POST /log` accepts `enabled=0|1`; uses `applyMqttLogForwarding()`.
+        - **Portal UI:** "Log forwarding" toggle added to the MQTT section; state is loaded from `GET /status` (`log_fwd` bool field).
+        - `GET /status` response now includes `"log_fwd": true|false`.
+        - New compile-time constants in `src/components/app_config.h`:
+            - `MQTT_LOG_TOPIC_SUFFIX` — suffix for the log topic (default `"log"`)
+            - `DEFAULT_MQTT_LOG_FORWARDING` — default enabled state (default `false`)
 
 ## Recent Firmware Updates (2026-03-25)
 

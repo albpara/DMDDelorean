@@ -2,6 +2,12 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 
 /* =================================================================
+ *  MQTT log forwarding globals
+ * ================================================================= */
+MqttLogger LOGGER(Serial);
+bool mqttLogForwardingEnabled = DEFAULT_MQTT_LOG_FORWARDING;
+
+/* =================================================================
  *  MQTT globals
  * ================================================================= */
 WiFiClient   mqttWifi;
@@ -202,7 +208,7 @@ void updateClockConfig(bool enabled, uint16_t every, const char *tz, bool persis
     clockConfigDirty = true;
     if (persist) persistClockConfig();
     mqttPublishClockState();
-    Serial.printf("[CLOCK] enabled=%d every=%u tz=%s\n",
+    LOGGER.printf("[CLOCK] enabled=%d every=%u tz=%s\n",
                   (int)clockModeEnabled, clockEveryNGifs, clockTz);
 }
 
@@ -463,11 +469,11 @@ void applyTextNotification(const char *payload) {
         taskEXIT_CRITICAL(&textNotifMux);
 
         if (enqueued) {
-            Serial.printf("[NOTIFY] queued text='%s' size=%d rainbow=%d dur=%u depth=%u\n",
+            LOGGER.printf("[NOTIFY] queued text='%s' size=%d rainbow=%d dur=%u depth=%u\n",
                           nextNotif.text, nextNotif.size,
                           (int)nextNotif.rainbow, nextNotif.duration, depth);
         } else {
-            Serial.printf("[NOTIFY] dropped text='%s' (queue full: %u)\n",
+            LOGGER.printf("[NOTIFY] dropped text='%s' (queue full: %u)\n",
                           nextNotif.text, (unsigned)NOTIFY_QUEUE_LEN);
         }
     }
@@ -484,7 +490,7 @@ void applyDashboardPayload(const char *payload) {
         wrapped = "[" + s + "]";
     }
     if (!wrapped.startsWith("[")) {
-        Serial.println("[DASH] invalid payload: expected JSON array/object");
+        LOGGER.println("[DASH] invalid payload: expected JSON array/object");
         return;
     }
 
@@ -619,7 +625,7 @@ void applyDashboardPayload(const char *payload) {
     dashboardCardCursor = 0;
     taskEXIT_CRITICAL(&dashboardMux);
 
-    Serial.printf("[DASH] loaded %u card(s)\n", parsedCount);
+    LOGGER.printf("[DASH] loaded %u card(s)\n", parsedCount);
     mqttPublishDashboardState();
 }
 
@@ -630,7 +636,7 @@ void applyBrightness(uint8_t val) {
     brightness = val;
     uint8_t capped = (safeBrightness && val > MAX_BRIGHTNESS_VAL) ? MAX_BRIGHTNESS_VAL : val;
     if (dma_display) dma_display->setBrightness8(panelOn ? capped : 0);
-    Serial.printf("[BRIGHT] requested=%u effective=%u safe=%s\n",
+    LOGGER.printf("[BRIGHT] requested=%u effective=%u safe=%s\n",
                   val, panelOn ? capped : 0, safeBrightness ? "ON" : "OFF");
 }
 
@@ -656,7 +662,7 @@ void applySafeBrightness(bool safe) {
     applyBrightness(brightness);
     // Re-publish discovery so HA updates the brightness slider scale
     mqttPublishDiscovery();
-    Serial.printf("[BRIGHT] safe_brightness=%s\n", safe ? "ON" : "OFF");
+    LOGGER.printf("[BRIGHT] safe_brightness=%s\n", safe ? "ON" : "OFF");
 }
 
 void loadPanelConfig() {
@@ -664,7 +670,40 @@ void loadPanelConfig() {
     prefs.begin("panel", true);
     safeBrightness = prefs.getBool("safe_br", DEFAULT_SAFE_BRIGHTNESS);
     prefs.end();
-    Serial.printf("[BRIGHT] loadPanelConfig safe_brightness=%s\n", safeBrightness ? "ON" : "OFF");
+    LOGGER.printf("[BRIGHT] loadPanelConfig safe_brightness=%s\n", safeBrightness ? "ON" : "OFF");
+}
+
+/* =================================================================
+ *  MQTT LOG FORWARDING
+ * ================================================================= */
+void mqttPublishLog(const char *line) {
+    if (!mqttEnabled || !mqttClient.connected()) return;
+    String logTopic = mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX;
+    // strip trailing newline for a cleaner MQTT payload
+    size_t len = strlen(line);
+    if (len > 0 && line[len - 1] == '\n') {
+        char tmp[MQTT_LOGGER_LINE_BUF];
+        size_t copy = (len - 1 < sizeof(tmp) - 1) ? len - 1 : sizeof(tmp) - 1;
+        memcpy(tmp, line, copy);
+        tmp[copy] = '\0';
+        mqttClient.publish(logTopic.c_str(), tmp, false);
+    } else {
+        mqttClient.publish(logTopic.c_str(), line, false);
+    }
+}
+
+void applyMqttLogForwarding(bool en) {
+    mqttLogForwardingEnabled = en;
+    Preferences prefs;
+    prefs.begin("mqtt", false);
+    prefs.putBool("log_fwd", en);
+    prefs.end();
+    // Publish new state
+    if (mqttClient.connected()) {
+        String stateTopic = mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/state";
+        mqttClient.publish(stateTopic.c_str(), en ? "ON" : "OFF", true);
+    }
+    LOGGER.printf("[MQTT] Log forwarding %s\n", en ? "enabled" : "disabled");
 }
 
 /* =================================================================
@@ -710,7 +749,7 @@ void mqttPublishDiscovery() {
         ",\"payload_not_available\":\"offline\""
         "}";
     bool ok = mqttClient.publish(lightDiscTopic.c_str(), payload.c_str(), true);
-    Serial.printf("[MQTT] Discovery %s (%u bytes to %s)\n",
+    LOGGER.printf("[MQTT] Discovery %s (%u bytes to %s)\n",
                   ok ? "sent" : "FAILED", payload.length(), lightDiscTopic.c_str());
 
     String clockSwitchDiscTopic = "homeassistant/switch/" + mqttClientId + "_clock/config";
@@ -870,6 +909,31 @@ void mqttPublishDiscovery() {
         "}"
         "}";
     mqttClient.publish(safeBrDiscTopic.c_str(), safeBrPayload.c_str(), true);
+
+    String logFwdDiscTopic = "homeassistant/switch/" + mqttClientId + "_log_fwd/config";
+    String logFwdPayload = "{\"name\":\"Log Forwarding\""
+        ",\"unique_id\":\"" + mqttClientId + "_log_fwd\""
+        ",\"object_id\":\"" + mqttClientId + "_log_fwd\""
+        ",\"command_topic\":\"" + mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/set\""
+        ",\"state_topic\":\"" + mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/state\""
+        ",\"payload_on\":\"ON\""
+        ",\"payload_off\":\"OFF\""
+        ",\"state_on\":\"ON\""
+        ",\"state_off\":\"OFF\""
+        ",\"entity_category\":\"diagnostic\""
+        ",\"icon\":\"mdi:math-log\""
+        ",\"availability_topic\":\"" + mqttTopic + "/available\""
+        ",\"payload_available\":\"online\""
+        ",\"payload_not_available\":\"offline\""
+        ",\"device\":{"
+            "\"identifiers\":[\"" + mqttClientId + "\"]"
+            ",\"name\":\"DeLorean DMD\""
+            ",\"model\":\"128x32 HUB75 LED Matrix\""
+            ",\"manufacturer\":\"DeLorean DMD\""
+            ",\"configuration_url\":\"http://" + ip + "/\""
+        "}"
+        "}";
+    mqttClient.publish(logFwdDiscTopic.c_str(), logFwdPayload.c_str(), true);
 }
 
 /* =================================================================
@@ -892,6 +956,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String dashModeTopic = mqttTopic + "/dashboard/mode/set";
     String dashDwellTopic = mqttTopic + "/dashboard/dwell/set";
     String dashProfileTopic = mqttTopic + "/dashboard/profile/set";
+    String logFwdTopic = mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/set";
 
     if (t == cmdTopic) {
         String s(msg);
@@ -934,12 +999,18 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
         applyDashboardDwellPayload(msg);
     } else if (t == dashProfileTopic) {
         applyDashboardProfilePayload(msg);
+    } else if (t == logFwdTopic) {
+        String s(msg);
+        s.trim();
+        s.toUpperCase();
+        bool en = (s == "ON" || s == "1" || s == "TRUE");
+        applyMqttLogForwarding(en);
     } else if (t == rebootTopic) {
         String s(msg);
         s.trim();
         s.toUpperCase();
         if (s.length() == 0 || s == "PRESS" || s == "REBOOT" || s == "ON" || s == "1") {
-            Serial.println("[MQTT] Reboot command received");
+            LOGGER.println("[MQTT] Reboot command received");
             String availTopic = mqttTopic + "/available";
             mqttClient.publish(availTopic.c_str(), "offline", true);
             mqttClient.loop();
@@ -963,7 +1034,7 @@ void mqttConnect() {
     if (millis() - mqttLastRetry < MQTT_RETRY_INTERVAL) return;
     mqttLastRetry = millis();
 
-    Serial.printf("[MQTT] Connecting to %s:%d as '%s'...\n",
+    LOGGER.printf("[MQTT] Connecting to %s:%d as '%s'...\n",
                   mqttServer.c_str(), mqttPort, mqttClientId.c_str());
 
     mqttClient.setServer(mqttServer.c_str(), mqttPort);
@@ -980,7 +1051,7 @@ void mqttConnect() {
                                 availTopic.c_str(), 0, true, "offline");
 
     if (ok) {
-        Serial.println("[MQTT] Connected!");
+        LOGGER.println("[MQTT] Connected!");
         mqttClient.publish(availTopic.c_str(), "online", true);
         String cmdTopic    = mqttTopic + "/set";
         String brTopic     = mqttTopic + "/brightness/set";
@@ -993,6 +1064,7 @@ void mqttConnect() {
         String dashModeTopic = mqttTopic + "/dashboard/mode/set";
         String dashDwellTopic = mqttTopic + "/dashboard/dwell/set";
         String dashProfileTopic = mqttTopic + "/dashboard/profile/set";
+        String logFwdTopic = mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/set";
         mqttClient.subscribe(cmdTopic.c_str());
         mqttClient.subscribe(brTopic.c_str());
         mqttClient.subscribe(safeBrTopic.c_str());
@@ -1004,22 +1076,25 @@ void mqttConnect() {
         mqttClient.subscribe(dashModeTopic.c_str());
         mqttClient.subscribe(dashDwellTopic.c_str());
         mqttClient.subscribe(dashProfileTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", clockTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", clockEveryTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", rebootTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", dashSetTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", dashModeTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", dashDwellTopic.c_str());
-        Serial.printf("[MQTT] Subscribed to %s\n", dashProfileTopic.c_str());
+        mqttClient.subscribe(logFwdTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", notifyTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", clockTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", clockEveryTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", rebootTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", dashSetTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", dashModeTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", dashDwellTopic.c_str());
+        LOGGER.printf("[MQTT] Subscribed to %s\n", dashProfileTopic.c_str());
         mqttPublishDiscovery();
         mqttPublishState();
         mqttPublishClockState();
         mqttPublishDashboardState();
         String safeBrStateTopic = mqttTopic + "/brightness/safe/state";
         mqttClient.publish(safeBrStateTopic.c_str(), safeBrightness ? "ON" : "OFF", true);
+        String logFwdStateTopic = mqttTopic + "/" + MQTT_LOG_TOPIC_SUFFIX + "/state";
+        mqttClient.publish(logFwdStateTopic.c_str(), mqttLogForwardingEnabled ? "ON" : "OFF", true);
     } else {
-        Serial.printf("[MQTT] Failed, rc=%d\n", mqttClient.state());
+        LOGGER.printf("[MQTT] Failed, rc=%d\n", mqttClient.state());
     }
 }
 
@@ -1035,10 +1110,11 @@ void loadMqttConfig() {
     mqttPass     = prefs.getString("pass", "");
     mqttClientId = prefs.getString("client", MQTT_DEFAULT_CLIENT);
     mqttTopic    = prefs.getString("topic", MQTT_DEFAULT_TOPIC);
+    mqttLogForwardingEnabled = prefs.getBool("log_fwd", DEFAULT_MQTT_LOG_FORWARDING);
     prefs.end();
     mqttEnabled = (mqttServer.length() > 0);
     if (mqttEnabled)
-        Serial.printf("[MQTT] Config loaded: %s:%d topic=%s\n",
+        LOGGER.printf("[MQTT] Config loaded: %s:%d topic=%s\n",
                       mqttServer.c_str(), mqttPort, mqttTopic.c_str());
 }
 
